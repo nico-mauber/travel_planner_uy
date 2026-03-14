@@ -1,0 +1,6 @@
+.env
+data/llm_data/
+data/feedbacks.json
+venv/
+__pycache__/
+*.pyc
