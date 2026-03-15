@@ -1,26 +1,44 @@
-"""Perfil y Preferencias del Viajero (REQ-UI-007)."""
+"""Perfil y Preferencias del Viajero (REQ-UI-007, REQ-CL-001)."""
 
 import streamlit as st
 from services.profile_service import save_profile
+from services.auth_service import get_current_user_id
 
 
 try:
-    st.title("👤 Perfil y Preferencias")
+    st.title("Perfil y Preferencias")
     st.markdown(
         "Configura tus preferencias de viaje para que el agente personalice "
         "sus sugerencias."
     )
     st.markdown("---")
 
+    user_id = get_current_user_id()
+
+    # ─── Info del usuario autenticado (read-only) ───
+    current_user = st.session_state.get("current_user")
+    if current_user:
+        st.subheader("Cuenta")
+        info_cols = st.columns([0.15, 0.85])
+        with info_cols[0]:
+            picture = current_user.get("picture", "")
+            if picture:
+                st.image(picture, width=60)
+        with info_cols[1]:
+            st.markdown(f"**{current_user.get('name', '')}**")
+            st.markdown(f"Email: {current_user.get('email', '')}")
+        st.markdown("---")
+
+    # ─── Preferencias editables ───
     profile = st.session_state.get("user_profile", {})
 
     with st.form("profile_form"):
         tab_aloj, tab_food, tab_style, tab_budget, tab_transport = st.tabs([
-            "🏨 Alojamiento",
-            "🍽️ Alimentación",
-            "🎯 Estilo de viaje",
-            "💰 Presupuesto",
-            "✈️ Transporte",
+            "Alojamiento",
+            "Alimentacion",
+            "Estilo de viaje",
+            "Presupuesto",
+            "Transporte",
         ])
 
         with tab_aloj:
@@ -47,15 +65,15 @@ try:
             allergies = st.text_input(
                 "Alergias",
                 value=profile.get("allergies", ""),
-                placeholder="Ej: maní, mariscos...",
+                placeholder="Ej: mani, mariscos...",
             )
 
         with tab_style:
             travel_styles = st.multiselect(
                 "Estilo de viaje preferido",
                 options=[
-                    "Aventura", "Relax", "Cultural", "Gastronómico",
-                    "Familiar", "Romántico", "Mochilero", "Lujo",
+                    "Aventura", "Relax", "Cultural", "Gastronomico",
+                    "Familiar", "Romantico", "Mochilero", "Lujo",
                 ],
                 default=profile.get("travel_styles", []),
             )
@@ -71,12 +89,12 @@ try:
 
         with tab_transport:
             airlines = st.text_area(
-                "Aerolíneas preferidas",
+                "Aerolineas preferidas",
                 value=profile.get("preferred_airlines", ""),
                 placeholder="Ej: LATAM, Iberia, United...",
             )
 
-        submitted = st.form_submit_button("💾 Guardar preferencias", type="primary")
+        submitted = st.form_submit_button("Guardar preferencias", type="primary")
 
         if submitted:
             if daily_budget < 0:
@@ -91,13 +109,13 @@ try:
                     "preferred_airlines": airlines,
                     "preferred_hotel_chains": hotel_chains,
                 }
-                if save_profile(new_profile):
+                if save_profile(new_profile, user_id=user_id):
                     st.session_state.user_profile = new_profile
-                    st.success("✅ Preferencias guardadas correctamente.")
+                    st.success("Preferencias guardadas correctamente.")
                 else:
                     st.error("Error al guardar las preferencias. Intenta de nuevo.")
 
 except Exception as e:
     st.error(f"Error al cargar el perfil: {e}")
-    if st.button("🔄 Reintentar"):
+    if st.button("Reintentar"):
         st.rerun()

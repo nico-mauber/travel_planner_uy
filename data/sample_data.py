@@ -3,11 +3,13 @@
 from config.settings import TripStatus, ItemStatus, ItemType
 
 
-def get_sample_trips() -> list:
+def get_sample_trips(user_id=None) -> list:
     """Retorna 3 viajes demo con ~30 items totales."""
+    _uid = user_id or "user-demo0001"
     return [
         {
             "id": "trip-001",
+            "user_id": _uid,
             "name": "Aventura en Tokio",
             "destination": "Tokio, Japón",
             "start_date": "2026-04-10",
@@ -282,6 +284,7 @@ def get_sample_trips() -> list:
         },
         {
             "id": "trip-002",
+            "user_id": _uid,
             "name": "Barcelona Cultural",
             "destination": "Barcelona, España",
             "start_date": "2026-05-20",
@@ -469,6 +472,7 @@ def get_sample_trips() -> list:
         },
         {
             "id": "trip-003",
+            "user_id": _uid,
             "name": "Escapada a Lima",
             "destination": "Lima, Perú",
             "start_date": "2026-02-05",
@@ -614,63 +618,6 @@ def get_sample_profile() -> dict:
         "daily_budget": 150.0,
         "preferred_airlines": "LATAM, Iberia",
         "preferred_hotel_chains": "Marriott, Ibis",
-    }
-
-
-def get_sample_chat_histories() -> dict:
-    """Retorna historiales de chat de ejemplo por viaje."""
-    return {
-        "trip-001": [
-            {
-                "role": "assistant",
-                "type": "text",
-                "content": "¡Hola! Soy tu asistente de viajes. Veo que estás planificando un viaje a Tokio. ¿En qué puedo ayudarte?",
-            },
-            {
-                "role": "user",
-                "type": "text",
-                "content": "Quiero visitar el templo Senso-ji el segundo día por la mañana",
-            },
-            {
-                "role": "assistant",
-                "type": "text",
-                "content": "¡Excelente elección! El templo Senso-ji es el más antiguo de Tokio y está en el barrio de Asakusa. Lo he agregado a tu itinerario para el Día 2 de 09:30 a 12:00. También te sugiero desayunar en el mercado exterior de Tsukiji antes, que está relativamente cerca.",
-            },
-            {
-                "role": "user",
-                "type": "text",
-                "content": "¿Qué más puedo hacer ese día?",
-            },
-            {
-                "role": "assistant",
-                "type": "text",
-                "content": "Para el Día 2, después de Senso-ji te sugiero almorzar ramen en Ichiran (una experiencia única con cabinas individuales). Por la tarde, podrías subir al Tokyo Skytree para una vista panorámica increíble. He agregado estas sugerencias a tu itinerario.",
-            },
-        ],
-        "trip-002": [
-            {
-                "role": "assistant",
-                "type": "text",
-                "content": "¡Hola! Tu viaje a Barcelona está confirmado. ¿Necesitas ajustar algo del itinerario?",
-            },
-            {
-                "role": "user",
-                "type": "text",
-                "content": "Me gustaría agregar una cena especial el último día antes de volver",
-            },
-            {
-                "role": "assistant",
-                "type": "text",
-                "content": "Tu vuelo de regreso sale a las 14:00 del Día 5, así que una cena el Día 4 sería perfecto. Te sugiero una cena de paella frente al mar en Barceloneta. He agregado la sugerencia a tu itinerario del Día 4 a las 20:00.",
-            },
-        ],
-        "trip-003": [
-            {
-                "role": "assistant",
-                "type": "text",
-                "content": "Tu viaje a Lima ha sido completado. ¡Espero que hayas disfrutado la gastronomía peruana! ¿Te gustaría dejar tu retroalimentación?",
-            },
-        ],
     }
 
 

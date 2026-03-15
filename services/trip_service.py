@@ -7,32 +7,81 @@ from datetime import date, timedelta
 from typing import List, Optional
 
 from config.settings import TripStatus, ItemStatus, ItemType
-from data.sample_data import get_sample_trips, get_sample_chat_histories
+from data.sample_data import get_sample_trips
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 TRIPS_FILE = os.path.join(DATA_DIR, "trips.json")
 
 
-def load_trips() -> list:
-    """Carga viajes desde JSON. Si está vacío, carga datos de ejemplo."""
+def load_trips(user_id: Optional[str] = None) -> list:
+    """Carga viajes desde JSON, filtrados por user_id si se proporciona.
+
+    Viajes sin user_id se tratan como demo. Si no hay viajes para el user_id,
+    carga sample_data con ese user_id.
+    """
+    all_trips = []
     try:
         with open(TRIPS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             if data:
-                return data
+                all_trips = data
     except (FileNotFoundError, json.JSONDecodeError):
         pass
-    # Cargar datos de ejemplo y persistir
-    sample = get_sample_trips()
-    save_trips(sample)
-    return sample
+
+    if user_id:
+        # Viajes sin user_id se tratan como del usuario demo
+        user_trips = [
+            t for t in all_trips
+            if t.get("user_id", "user-demo0001") == user_id
+        ]
+        if not user_trips:
+            # Cargar datos de ejemplo para este usuario
+            sample = get_sample_trips(user_id=user_id)
+            all_trips.extend(sample)
+            save_trips(all_trips)
+            return sample
+        return user_trips
+
+    # Sin user_id: comportamiento original (modo demo)
+    if not all_trips:
+        sample = get_sample_trips()
+        save_trips(sample)
+        return sample
+    return all_trips
 
 
 def save_trips(trips: list) -> None:
-    """Persiste viajes en JSON."""
+    """Persiste viajes en JSON (escribe la lista completa tal cual)."""
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(TRIPS_FILE, "w", encoding="utf-8") as f:
         json.dump(trips, f, ensure_ascii=False, indent=2)
+
+
+def _load_all_trips_raw() -> list:
+    """Carga TODOS los viajes del archivo sin filtrar."""
+    try:
+        with open(TRIPS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return []
+
+
+def save_trips_for_user(user_trips: list, user_id: str) -> None:
+    """Guarda los viajes de un usuario sin perder los de otros usuarios.
+
+    Lee el archivo completo, reemplaza solo los viajes del user_id dado,
+    y guarda todo junto.
+    """
+    all_trips = _load_all_trips_raw()
+    other_trips = [
+        t for t in all_trips
+        if t.get("user_id", "user-demo0001") != user_id
+    ]
+    merged = other_trips + user_trips
+    save_trips(merged)
 
 
 def get_trip_by_id(trips: list, trip_id: str) -> Optional[dict]:
@@ -70,10 +119,12 @@ def get_active_trip(trips: list, active_trip_id: Optional[str]) -> Optional[dict
 
 
 def create_trip(trips: list, name: str, destination: str,
-                start_date: str, end_date: str) -> dict:
+                start_date: str, end_date: str, user_id: Optional[str] = None) -> dict:
     """Crea un nuevo viaje en planificación."""
+    _uid = user_id or "user-demo0001"
     trip = {
         "id": f"trip-{uuid.uuid4().hex[:8]}",
+        "user_id": _uid,
         "name": name,
         "destination": destination,
         "start_date": start_date,
@@ -84,23 +135,25 @@ def create_trip(trips: list, name: str, destination: str,
         "notes": "",
     }
     trips.append(trip)
-    save_trips(trips)
+    save_trips_for_user(trips, _uid)
     return trip
 
 
-def delete_trip(trips: list, trip_id: str) -> bool:
+def delete_trip(trips: list, trip_id: str, user_id: Optional[str] = None) -> bool:
     """Elimina un viaje (solo si está en planificación)."""
     for i, trip in enumerate(trips):
         if trip["id"] == trip_id:
             if trip["status"] == TripStatus.PLANNING.value:
+                _uid = user_id or trip.get("user_id", "user-demo0001")
                 trips.pop(i)
-                save_trips(trips)
+                save_trips_for_user(trips, _uid)
                 return True
     return False
 
 
-def update_trip_statuses(trips: list) -> None:
-    """Actualiza automáticamente estados según fechas."""
+def update_trip_statuses(trips: list) -> bool:
+    """Actualiza automáticamente estados según fechas. Retorna True si hubo cambios."""
+    changed = False
     today = date.today()
     for trip in trips:
         start = date.fromisoformat(trip["start_date"])
@@ -112,10 +165,13 @@ def update_trip_statuses(trips: list) -> None:
 
         if today > end and current != TripStatus.COMPLETED.value:
             trip["status"] = TripStatus.COMPLETED.value
+            changed = True
         elif start <= today <= end and current in (
             TripStatus.CONFIRMED.value, TripStatus.PLANNING.value
         ):
             trip["status"] = TripStatus.IN_PROGRESS.value
+            changed = True
+    return changed
 
 
 def sort_trips(trips: list) -> list:
@@ -197,7 +253,7 @@ def recalculate_budget(trip: dict) -> None:
     trip["budget_total"] = total
 
 
-def sync_trip_changes(trips: list, trip: dict) -> None:
+def sync_trip_changes(trips: list, trip: dict, user_id: Optional[str] = None) -> None:
     """Sincroniza cambios: recalcula presupuesto, persiste en JSON."""
     recalculate_budget(trip)
     # Actualizar el trip en la lista
@@ -205,7 +261,8 @@ def sync_trip_changes(trips: list, trip: dict) -> None:
         if t["id"] == trip["id"]:
             trips[i] = trip
             break
-    save_trips(trips)
+    _uid = user_id or trip.get("user_id", "user-demo0001")
+    save_trips_for_user(trips, _uid)
 
 
 def get_transfer_info(item_a: dict, item_b: dict) -> Optional[dict]:

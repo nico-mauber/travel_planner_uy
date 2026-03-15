@@ -80,7 +80,10 @@ INSTRUCCIONES:
                     break
             if not last_user_message:
                 return {"vector_memories": []}
-            relevant = self.memory_manager.search_vector_memory(last_user_message.content)
+            _user_id = state.get("user_id")
+            relevant = self.memory_manager.search_vector_memory(
+                last_user_message.content, user_id=_user_id
+            )
             return {"vector_memories": relevant}
 
         def context_optimization_node(state):
@@ -144,7 +147,10 @@ INSTRUCCIONES:
             if not last_user_message:
                 return {}
             if last_extraction != last_user_message.content:
-                self.memory_manager.extract_and_store_memories(last_user_message.content)
+                _user_id = state.get("user_id")
+                self.memory_manager.extract_and_store_memories(
+                    last_user_message.content, user_id=_user_id
+                )
                 return {"last_memory_extraction": last_user_message.content}
             return {}
 
@@ -167,13 +173,13 @@ INSTRUCCIONES:
 
     def chat(self, message: str, trip: Optional[dict] = None,
              user_profile: Optional[dict] = None,
-             chat_id: str = "default") -> dict:
+             user_id: str = "demo", chat_id: str = "default") -> dict:
         """Envía mensaje y retorna respuesta en formato Trip Planner.
 
         Retorna: {role: "assistant", type: "text", content: str}
         """
         try:
-            config = {"configurable": {"thread_id": f"trip_chat_{chat_id}"}}
+            config = {"configurable": {"thread_id": f"trip_chat_{user_id}_{chat_id}"}}
 
             # Serializar contexto del viaje
             trip_context = ""
@@ -198,6 +204,7 @@ INSTRUCCIONES:
                     "messages": [HumanMessage(content=message)],
                     "trip_context": trip_context,
                     "user_profile": user_profile or {},
+                    "user_id": user_id,
                 },
                 config,
             )

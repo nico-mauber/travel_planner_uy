@@ -1,13 +1,17 @@
 """Trip Planner MVP — Punto de entrada Streamlit."""
 
+import os
+import sys
+
 from dotenv import load_dotenv
 load_dotenv()
 
 import streamlit as st
 
 from config.settings import TRIP_STATUS_LABELS, TripStatus
-from services.trip_service import load_trips, get_active_trip, update_trip_statuses, save_trips
-from data.sample_data import get_sample_chat_histories
+from services.trip_service import load_trips, get_active_trip, update_trip_statuses, save_trips_for_user
+from services.auth_service import is_auth_enabled, require_auth, get_current_user_id
+from services.chat_service import load_chats
 
 
 # ─── Page config ───
@@ -60,26 +64,62 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ─── Verificar entorno ───
+from services.auth_service import _AUTHLIB_AVAILABLE, _PYTHON_EXECUTABLE
+if not _AUTHLIB_AVAILABLE:
+    _is_venv = "venv" in _PYTHON_EXECUTABLE or "envs" in _PYTHON_EXECUTABLE
+    st.warning(
+        f"**Login con Google deshabilitado** — Authlib no esta instalado.\n\n"
+        f"Python en uso: `{_PYTHON_EXECUTABLE}`\n\n"
+        + (
+            "Ejecuta:\n```\npip install Authlib>=1.3.2\n```\nY reinicia la app."
+            if _is_venv else
+            "**No estas usando el venv del proyecto.** Ejecuta:\n"
+            "```\nvenv\\Scripts\\activate\npython -m streamlit run app.py\n```"
+        )
+        + "\n\nContinuando en modo demo (sin login).",
+        icon="⚠️",
+    )
+
+# ─── Guard de autenticacion ───
+require_auth()
+
+# ─── Detectar logout y limpiar session_state ───
+if is_auth_enabled():
+    user_info = getattr(st, "user", None)
+    was_logged_in = "current_user" in st.session_state
+    is_logged_in = user_info and getattr(user_info, "is_logged_in", False)
+    if was_logged_in and not is_logged_in:
+        for key in ["trips", "active_trip_id", "user_chats", "active_chat_id",
+                     "dismissed_alerts", "user_profile", "current_user"]:
+            st.session_state.pop(key, None)
+
+# ─── Obtener user_id actual ───
+current_user_id = get_current_user_id()
+
 # ─── Inicializar session_state ───
 if "trips" not in st.session_state:
-    st.session_state.trips = load_trips()
+    st.session_state.trips = load_trips(user_id=current_user_id)
 
 if "active_trip_id" not in st.session_state:
     st.session_state.active_trip_id = None
 
-if "chat_histories" not in st.session_state:
-    st.session_state.chat_histories = get_sample_chat_histories()
+if "user_chats" not in st.session_state:
+    st.session_state.user_chats = load_chats(current_user_id)
+
+if "active_chat_id" not in st.session_state:
+    st.session_state.active_chat_id = None
 
 if "dismissed_alerts" not in st.session_state:
     st.session_state.dismissed_alerts = set()
 
 if "user_profile" not in st.session_state:
     from services.profile_service import load_profile
-    st.session_state.user_profile = load_profile()
+    st.session_state.user_profile = load_profile(user_id=current_user_id)
 
-# ─── Actualizar estados por fecha ───
-update_trip_statuses(st.session_state.trips)
-save_trips(st.session_state.trips)
+# ─── Actualizar estados por fecha (solo persistir si hubo cambios) ───
+if update_trip_statuses(st.session_state.trips):
+    save_trips_for_user(st.session_state.trips, current_user_id)
 
 # ─── Navegación ───
 pages = [
@@ -97,6 +137,19 @@ pg = st.navigation(pages)
 # ─── Sidebar ───
 with st.sidebar:
     st.markdown("## ✈️ Trip Planner")
+
+    # Info del usuario autenticado
+    current_user = st.session_state.get("current_user")
+    if current_user:
+        user_cols = st.columns([0.25, 0.75])
+        with user_cols[0]:
+            picture = current_user.get("picture", "")
+            if picture:
+                st.image(picture, width=40)
+        with user_cols[1]:
+            st.markdown(f"**{current_user.get('name', '')}**")
+            st.caption(current_user.get("email", ""))
+
     st.divider()
 
     # Viaje activo
@@ -132,6 +185,12 @@ with st.sidebar:
     # Botón fijo "Abrir Chat"
     if st.button("💬 Abrir Chat", use_container_width=True):
         st.switch_page("pages/2_Chat.py")
+
+    # Boton de cerrar sesion (solo si auth habilitada)
+    if is_auth_enabled() and current_user:
+        st.divider()
+        if st.button("Cerrar sesion", use_container_width=True):
+            st.logout()
 
 # ─── Ejecutar página ───
 pg.run()

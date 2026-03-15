@@ -12,17 +12,21 @@ except Exception:
 
 
 def process_message_llm(message: str, trip: Optional[dict] = None,
-                         user_profile: Optional[dict] = None) -> dict:
+                         user_profile: Optional[dict] = None,
+                         user_id: Optional[str] = None,
+                         chat_id: Optional[str] = None) -> dict:
     """Procesa mensaje usando el LLM. Retorna {role, type, content}."""
     if not LLM_AVAILABLE:
         raise RuntimeError("LLM no disponible")
 
     chatbot = TripChatbot.get_instance()
-    chat_id = trip["id"] if trip else "__no_trip__"
+    _chat_id = chat_id or (trip["id"] if trip else "__no_trip__")
+    _user_id = user_id or "demo"
 
     return chatbot.chat(
         message=message,
         trip=trip,
         user_profile=user_profile,
-        chat_id=chat_id,
+        user_id=_user_id,
+        chat_id=_chat_id,
     )

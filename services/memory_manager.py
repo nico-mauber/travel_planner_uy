@@ -21,6 +21,7 @@ class MemoryState(TypedDict):
     user_profile: Dict[str, Any]
     last_memory_extraction: Optional[str]
     trip_context: Optional[str]
+    user_id: Optional[str]
 
 
 class ExtractedMemory(BaseModel):
@@ -99,7 +100,8 @@ Si no es relevante, responde con categoría "none".
 
     # --- MEMORIA VECTORIAL ---
 
-    def save_vector_memory(self, text: str, metadata: Optional[Dict] = None) -> str:
+    def save_vector_memory(self, text: str, metadata: Optional[Dict] = None,
+                           user_id: Optional[str] = None) -> str:
         """Guarda una memoria en ChromaDB. Retorna memory_id."""
         if not self.collection:
             return ""
@@ -110,6 +112,8 @@ Si no es relevante, responde con categoría "none".
                 "timestamp": datetime.now().isoformat(),
                 "memory_id": memory_id,
             })
+            if user_id:
+                doc_metadata["user_id"] = user_id
             self.collection.add(
                 documents=[text],
                 ids=[memory_id],
@@ -120,18 +124,26 @@ Si no es relevante, responde con categoría "none".
             print(f"Error guardando memoria vectorial: {e}")
             return ""
 
-    def search_vector_memory(self, query: str, k: int = MAX_VECTOR_RESULTS) -> List[str]:
-        """Busca memorias semánticamente similares. Retorna lista de textos."""
+    def search_vector_memory(self, query: str, k: int = MAX_VECTOR_RESULTS,
+                             user_id: Optional[str] = None) -> List[str]:
+        """Busca memorias semánticamente similares. Retorna lista de textos.
+
+        Si user_id se proporciona, filtra por usuario. Si es None, busca sin filtro
+        (compatibilidad con memorias existentes sin user_id).
+        """
         if not self.collection:
             return []
         try:
             count = self.collection.count()
             if count == 0:
                 return []
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=min(k, count),
-            )
+            query_kwargs = {
+                "query_texts": [query],
+                "n_results": min(k, count),
+            }
+            if user_id:
+                query_kwargs["where"] = {"user_id": user_id}
+            results = self.collection.query(**query_kwargs)
             return results["documents"][0] if results["documents"] else []
         except Exception as e:
             print(f"Error buscando memoria vectorial: {e}")
@@ -156,10 +168,11 @@ Si no es relevante, responde con categoría "none".
             print(f"Error obteniendo memorias vectoriales: {e}")
             return []
 
-    def extract_and_store_memories(self, user_message: str) -> bool:
+    def extract_and_store_memories(self, user_message: str,
+                                   user_id: Optional[str] = None) -> bool:
         """Extrae memorias del mensaje y las guarda si son relevantes."""
         if not self.extraction_chain:
-            return self._extract_memories_manual(user_message)
+            return self._extract_memories_manual(user_message, user_id=user_id)
         try:
             extracted = self.extraction_chain.invoke({"user_message": user_message})
             if extracted.category != "none" and extracted.importance >= 2:
@@ -170,14 +183,16 @@ Si no es relevante, responde con categoría "none".
                         "importance": extracted.importance,
                         "original_message": user_message[:200],
                     },
+                    user_id=user_id,
                 )
                 return bool(memory_id)
             return False
         except Exception as e:
             print(f"Error en extracción automática: {e}")
-            return self._extract_memories_manual(user_message)
+            return self._extract_memories_manual(user_message, user_id=user_id)
 
-    def _extract_memories_manual(self, user_message: str) -> bool:
+    def _extract_memories_manual(self, user_message: str,
+                                 user_id: Optional[str] = None) -> bool:
         """Fallback manual orientado a viajes."""
         message_lower = user_message.lower()
         memory_rules = [
@@ -209,5 +224,7 @@ Si no es relevante, responde con categoría "none".
         ]
         for phrases, category, memory_text in memory_rules:
             if any(phrase in message_lower for phrase in phrases):
-                return bool(self.save_vector_memory(memory_text, {"category": category}))
+                return bool(self.save_vector_memory(
+                    memory_text, {"category": category}, user_id=user_id
+                ))
         return False

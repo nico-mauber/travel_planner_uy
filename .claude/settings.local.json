@@ -4,10 +4,12 @@
   },
   "permissions": {
     "allow": [
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "WebSearch",
+      "Bash(ls:*)"
     ]
   },
-  "preferences":{
+  "preferences": {
     "tmuxSplitPanes": true
   }
 }

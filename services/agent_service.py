@@ -23,7 +23,9 @@ def is_llm_active() -> bool:
     return _USE_LLM
 
 
-def process_message(message: str, trip: Optional[dict] = None) -> dict:
+def process_message(message: str, trip: Optional[dict] = None,
+                    user_id: Optional[str] = None,
+                    chat_id: Optional[str] = None) -> dict:
     """Procesa un mensaje del usuario. Usa LLM si disponible, sino mock.
 
     Retorna dict con:
@@ -66,7 +68,10 @@ def process_message(message: str, trip: Optional[dict] = None) -> dict:
         try:
             import streamlit as st
             user_profile = st.session_state.get("user_profile")
-            return process_message_llm(message, trip, user_profile)
+            return process_message_llm(
+                message, trip, user_profile,
+                user_id=user_id, chat_id=chat_id,
+            )
         except Exception:
             pass  # Fallback al mock
 

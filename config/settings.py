@@ -97,6 +97,9 @@ BUDGET_CATEGORY_LABELS = {
     BudgetCategory.EXTRAS: "Extras",
 }
 
+# Constantes de autenticacion
+DEMO_USER_ID = "user-demo0001"
+
 # Mapeo de ItemType a BudgetCategory
 ITEM_TYPE_TO_BUDGET = {
     ItemType.ACTIVITY: BudgetCategory.ACTIVITIES,

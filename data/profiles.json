@@ -1,17 +1,53 @@
 {
-  "accommodation_types": [
-    "Hotel",
-    "Apartamento"
-  ],
-  "food_restrictions": [
-    "Sin gluten"
-  ],
-  "allergies": "Maní",
-  "travel_styles": [
-    "Cultural",
-    "Gastronómico"
-  ],
-  "daily_budget": 150.0,
-  "preferred_airlines": "LATAM, Iberia",
-  "preferred_hotel_chains": "Marriott, Ibis"
+  "user-demo0001": {
+    "accommodation_types": [
+      "Hotel",
+      "Apartamento"
+    ],
+    "food_restrictions": [
+      "Sin gluten"
+    ],
+    "allergies": "Maní",
+    "travel_styles": [
+      "Cultural",
+      "Gastronómico"
+    ],
+    "daily_budget": 150.0,
+    "preferred_airlines": "LATAM, Iberia",
+    "preferred_hotel_chains": "Marriott, Ibis"
+  },
+  "user-da3297fc": {
+    "accommodation_types": [
+      "Hotel",
+      "Apartamento"
+    ],
+    "food_restrictions": [
+      "Sin gluten"
+    ],
+    "allergies": "Maní",
+    "travel_styles": [
+      "Cultural",
+      "Gastronómico"
+    ],
+    "daily_budget": 150.0,
+    "preferred_airlines": "LATAM, Iberia",
+    "preferred_hotel_chains": "Marriott, Ibis"
+  },
+  "user-3063b16a": {
+    "accommodation_types": [
+      "Hotel",
+      "Apartamento"
+    ],
+    "food_restrictions": [
+      "Sin gluten"
+    ],
+    "allergies": "Maní",
+    "travel_styles": [
+      "Cultural",
+      "Gastronómico"
+    ],
+    "daily_budget": 150.0,
+    "preferred_airlines": "LATAM, Iberia",
+    "preferred_hotel_chains": "Marriott, Ibis"
+  }
 }
