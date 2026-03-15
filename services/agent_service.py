@@ -7,6 +7,11 @@ import logging
 from typing import Optional
 
 from config.settings import ItemType, ItemStatus
+from services.trip_creation_flow import (
+    detect_trip_creation_intent, detect_cancel_intent,
+    extract_trip_data, get_missing_fields, build_prompt_for_missing,
+    validate_dates, build_confirmation_data, new_draft,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,35 +60,22 @@ def _detect_hotel_intent(msg: str) -> bool:
 
 def process_message(message: str, trip: Optional[dict] = None,
                     user_id: Optional[str] = None,
-                    chat_id: Optional[str] = None) -> dict:
+                    chat_id: Optional[str] = None,
+                    trip_creation_draft: Optional[dict] = None) -> dict:
     """Procesa un mensaje del usuario via LLM y/o Booking.com.
 
     Retorna dict con:
       - role: "assistant"
       - type: "text" | "card" | "confirmation" | "hotel_results"
       - content: str (texto) o dict (datos de tarjeta/confirmación)
+      - _trip_creation_draft: (opcional) estado parcial del flujo de creación
     """
     msg = message.lower().strip()
 
-    # ─── Acciones que requieren confirmación UI ───
-
-    # Sin viaje activo — crear viaje
-    if trip is None:
-        match = re.search(r"viajar\s+a\s+(.+?)(?:\s+en\s+|\s*$)", msg)
-        if match:
-            destination = match.group(1).strip().title()
-            return {
-                "role": "assistant",
-                "type": "confirmation",
-                "content": {
-                    "action": "create_trip",
-                    "summary": f"Crear nuevo viaje a {destination}",
-                    "details": {
-                        "destination": destination,
-                        "name": f"Viaje a {destination}",
-                    },
-                },
-            }
+    # ─── Flujo multi-turn de creación de viaje ───
+    result = _handle_trip_creation_flow(msg, message, trip, trip_creation_draft)
+    if result is not None:
+        return result
 
     # Agregar item — siempre confirmación
     if trip and any(w in msg for w in ["agregar", "añadir", "agrega", "añade"]):
@@ -158,6 +150,98 @@ def process_message(message: str, trip: Optional[dict] = None,
             "- Gestionar tu itinerario desde las secciones de la barra lateral"
         ),
     }
+
+
+def _handle_trip_creation_flow(
+    msg: str, original_message: str,
+    trip: Optional[dict], draft: Optional[dict],
+) -> Optional[dict]:
+    """Maneja el flujo multi-turn de creación de viaje.
+
+    Retorna un dict de respuesta si el flujo aplica, o None si no.
+    """
+    # ─── Draft activo: el usuario está en medio del flujo ───
+    if draft and draft.get("step") == "collecting":
+        # Cancelación
+        if detect_cancel_intent(msg):
+            return {
+                "role": "assistant",
+                "type": "text",
+                "content": "Entendido, cancelé la creación del viaje. ¿En qué más puedo ayudarte?",
+                "_trip_creation_draft": None,
+            }
+
+        # Extraer datos del mensaje y combinar con draft
+        updated = extract_trip_data(original_message, draft)
+        updated["step"] = "collecting"
+
+        missing = get_missing_fields(updated)
+
+        if not missing:
+            # Validar fechas
+            valid, error = validate_dates(updated["start_date"], updated["end_date"])
+            if not valid:
+                # Limpiar fechas inválidas para que las pida de nuevo
+                updated["start_date"] = None
+                updated["end_date"] = None
+                return {
+                    "role": "assistant",
+                    "type": "text",
+                    "content": error,
+                    "_trip_creation_draft": updated,
+                }
+
+            # Todo completo → confirmación
+            updated["step"] = "ready"
+            confirmation = build_confirmation_data(updated)
+            confirmation["_trip_creation_draft"] = None
+            return confirmation
+
+        # Faltan datos → pedir lo que falta
+        prompt = build_prompt_for_missing(updated, missing)
+        return {
+            "role": "assistant",
+            "type": "text",
+            "content": prompt,
+            "_trip_creation_draft": updated,
+        }
+
+    # ─── Sin draft: detectar intención de crear viaje ───
+    if trip is None and detect_trip_creation_intent(msg):
+        draft = new_draft()
+        updated = extract_trip_data(original_message, draft)
+        updated["step"] = "collecting"
+
+        missing = get_missing_fields(updated)
+
+        if not missing:
+            # Mensaje completo con todo → validar y confirmar directamente
+            valid, error = validate_dates(updated["start_date"], updated["end_date"])
+            if not valid:
+                updated["start_date"] = None
+                updated["end_date"] = None
+                prompt = error + "\n\n" + build_prompt_for_missing(updated, get_missing_fields(updated))
+                return {
+                    "role": "assistant",
+                    "type": "text",
+                    "content": prompt,
+                    "_trip_creation_draft": updated,
+                }
+            updated["step"] = "ready"
+            confirmation = build_confirmation_data(updated)
+            confirmation["_trip_creation_draft"] = None
+            return confirmation
+
+        # Faltan datos → iniciar flujo multi-turn
+        prompt = build_prompt_for_missing(updated, missing)
+        return {
+            "role": "assistant",
+            "type": "text",
+            "content": prompt,
+            "_trip_creation_draft": updated,
+        }
+
+    return None
 
 
 def _add_item_response(msg: str, trip: dict) -> dict:

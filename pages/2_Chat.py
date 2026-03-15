@@ -1,6 +1,7 @@
 """Chat con el Agente — Multiples conversaciones (REQ-UI-002, REQ-UI-003, REQ-CL-004, REQ-CL-005)."""
 
 import streamlit as st
+from datetime import date, timedelta
 
 from services.trip_service import get_active_trip, get_trip_by_id, create_trip
 from services.agent_service import process_message, apply_confirmed_action, is_llm_active, is_booking_active
@@ -187,18 +188,24 @@ try:
                         if result == "confirm":
                             if action_data.get("action") == "create_trip":
                                 details = action_data.get("details", {})
+                                fallback_start = str(date.today() + timedelta(days=30))
+                                fallback_end = str(date.today() + timedelta(days=37))
                                 new_trip = create_trip(
                                     trips,
                                     name=details.get("name", "Nuevo viaje"),
                                     destination=details.get("destination", "Sin destino"),
-                                    start_date="2026-05-01",
-                                    end_date="2026-05-07",
+                                    start_date=details.get("start_date", fallback_start),
+                                    end_date=details.get("end_date", fallback_end),
                                     user_id=user_id,
                                 )
                                 st.session_state.active_trip_id = new_trip["id"]
+                                # Asociar chat al nuevo viaje
+                                active_chat["trip_id"] = new_trip["id"]
                                 msg["processed"] = True
                                 msg["result"] = "Viaje creado"
                                 st.session_state.trips = trips
+                                # Limpiar draft de creación
+                                st.session_state.pop("_trip_creation_draft", None)
                                 persist_chat(active_chat)
                                 st.session_state.user_chats = load_chats(user_id)
                             elif chat_trip:
@@ -220,6 +227,8 @@ try:
                         elif result == "cancel":
                             msg["processed"] = True
                             msg["result"] = "Cancelado por el usuario"
+                            # Limpiar draft de creación si existía
+                            st.session_state.pop("_trip_creation_draft", None)
                             add_message(active_chat, {
                                 "role": "assistant",
                                 "type": "text",
@@ -247,11 +256,21 @@ try:
                 rename_chat(active_chat["chat_id"], new_title)
 
             with st.spinner("El asistente esta procesando tu solicitud..."):
+                trip_creation_draft = st.session_state.get("_trip_creation_draft")
                 response = process_message(
                     user_input, chat_trip,
                     user_id=user_id,
                     chat_id=active_chat["chat_id"],
+                    trip_creation_draft=trip_creation_draft,
                 )
+
+            # Manejar draft de creación de viaje en la respuesta
+            if "_trip_creation_draft" in response:
+                draft_value = response.pop("_trip_creation_draft")
+                if draft_value is None:
+                    st.session_state.pop("_trip_creation_draft", None)
+                else:
+                    st.session_state["_trip_creation_draft"] = draft_value
 
             add_message(active_chat, response)
             persist_chat(active_chat)

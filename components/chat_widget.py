@@ -69,17 +69,27 @@ def render_hotel_results(data: dict) -> None:
     st.caption("*Datos proporcionados por Booking.com via RapidAPI*")
 
 
+_CREATE_TRIP_LABELS = {
+    "destination": "Destino",
+    "name": "Nombre",
+    "start_date": "Fecha inicio",
+    "end_date": "Fecha fin",
+}
+
+
 def render_confirmation(action_data: dict, msg_index: int) -> str:
     """Renderiza una solicitud de confirmación. Retorna 'confirm', 'cancel' o ''."""
     with st.container(border=True):
         st.markdown(f"⚠️ **{action_data.get('summary', 'Acción pendiente')}**")
 
         details = action_data.get("details", {})
+        is_create_trip = action_data.get("action") == "create_trip"
         if details:
             detail_items = []
             for key, val in details.items():
                 if key not in ("action",) and val:
-                    detail_items.append(f"- **{key}**: {val}")
+                    label = _CREATE_TRIP_LABELS.get(key, key) if is_create_trip else key
+                    detail_items.append(f"- **{label}**: {val}")
             if detail_items:
                 st.markdown("\n".join(detail_items))
 
