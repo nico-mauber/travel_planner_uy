@@ -66,8 +66,8 @@ def render_transfer(transfer_info: dict) -> None:
     """Renderiza un bloque visual de traslado entre items."""
     with st.container():
         st.markdown(
-            f"<div style='background-color: #f0f0f0; padding: 8px 16px; "
-            f"border-radius: 8px; margin: 4px 0; border-left: 3px solid #9E9E9E;'>"
+            f"<div style='background-color: #1E1E2E; padding: 8px 16px; "
+            f"border-radius: 8px; margin: 4px 0; border-left: 3px solid #78909C;'>"
             f"🚕 <b>Traslado:</b> {transfer_info['from']} → {transfer_info['to']} "
             f"&nbsp;|&nbsp; {transfer_info['transport']} "
             f"&nbsp;|&nbsp; ⏱️ {transfer_info['duration']} "

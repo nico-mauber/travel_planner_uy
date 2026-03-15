@@ -157,7 +157,7 @@ def _render_fallback_calendar(trip: dict, items: list) -> None:
                     st.markdown(
                         f"<div style='border-left: 4px solid {color}; "
                         f"padding: 8px 12px; margin: 4px 0; border-radius: 4px; "
-                        f"background-color: #fafafa;'>"
+                        f"background-color: #1E1E2E;'>"
                         f"{status} {icon} <b>{item['name']}</b><br>"
                         f"🕐 {item['start_time']} — {item['end_time']}"
                         f"{'&nbsp;&nbsp;📍 ' + item['location'] if item.get('location') else ''}"

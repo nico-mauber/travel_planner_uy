@@ -33,10 +33,10 @@ st.markdown("""
         font-size: 0.85em;
         font-weight: 500;
     }
-    .status-planning { background-color: #FFF9C4; color: #F9A825; }
-    .status-confirmed { background-color: #C8E6C9; color: #2E7D32; }
-    .status-in-progress { background-color: #BBDEFB; color: #1565C0; }
-    .status-completed { background-color: #E0E0E0; color: #616161; }
+    .status-planning { background-color: #3E2E00; color: #FFD54F; }
+    .status-confirmed { background-color: #1B3A1B; color: #66BB6A; }
+    .status-in-progress { background-color: #0D2744; color: #64B5F6; }
+    .status-completed { background-color: #2A2A2A; color: #9E9E9E; }
 
     /* Items sugeridos */
     .suggested-item {
@@ -46,19 +46,19 @@ st.markdown("""
 
     /* Sidebar viaje activo */
     .active-trip-box {
-        background-color: #E3F2FD;
+        background-color: #1A2332;
         padding: 12px;
         border-radius: 8px;
-        border-left: 4px solid #1E88E5;
+        border-left: 4px solid #42A5F5;
         margin-bottom: 12px;
     }
 
     /* Transfers */
     .transfer-block {
-        background-color: #f5f5f5;
+        background-color: #1E1E2E;
         padding: 8px 16px;
         border-radius: 8px;
-        border-left: 3px solid #9E9E9E;
+        border-left: 3px solid #78909C;
         margin: 4px 0;
     }
 </style>

@@ -1,4 +1,4 @@
-"""Componentes del chat: tarjetas ricas y confirmaciones."""
+"""Componentes del chat: tarjetas ricas, resultados de hoteles y confirmaciones."""
 
 import streamlit as st
 from config.settings import ITEM_TYPE_ICONS, ItemType
@@ -44,6 +44,29 @@ def render_rich_card(card_data: dict) -> None:
 
             if card_data.get("notes"):
                 st.caption(card_data["notes"])
+
+            if card_data.get("booking_url"):
+                st.link_button("🔗 Ver en Booking.com", card_data["booking_url"])
+
+
+def render_hotel_results(data: dict) -> None:
+    """Renderiza resultados de busqueda de hoteles de Booking.com."""
+    text = data.get("text", "")
+    hotels = data.get("hotels", [])
+
+    if text:
+        st.markdown(text)
+
+    if not hotels:
+        st.info("No se encontraron hoteles disponibles para las fechas del viaje.")
+        return
+
+    st.markdown(f"**🏨 {len(hotels)} hoteles encontrados en Booking.com:**")
+
+    for hotel in hotels:
+        render_rich_card(hotel)
+
+    st.caption("*Datos proporcionados por Booking.com via RapidAPI*")
 
 
 def render_confirmation(action_data: dict, msg_index: int) -> str:

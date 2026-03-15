@@ -3,13 +3,13 @@
 import streamlit as st
 
 from services.trip_service import get_active_trip, get_trip_by_id, create_trip
-from services.agent_service import process_message, apply_confirmed_action, is_llm_active
+from services.agent_service import process_message, apply_confirmed_action, is_llm_active, is_booking_active
 from services.auth_service import get_current_user_id
 from services.chat_service import (
     load_chats, create_chat, get_chat_by_id, delete_chat,
     rename_chat, add_message, persist_chat, auto_generate_title,
 )
-from components.chat_widget import render_rich_card, render_confirmation
+from components.chat_widget import render_rich_card, render_confirmation, render_hotel_results
 
 
 try:
@@ -21,10 +21,14 @@ try:
     st.title("Chat con el Agente")
 
     # Indicador de modo
+    mode_parts = []
     if is_llm_active():
-        st.caption("Asistente IA (Gemini)")
+        mode_parts.append("Gemini")
     else:
-        st.caption("Asistente basico (sin LLM)")
+        mode_parts.append("Modo basico")
+    if is_booking_active():
+        mode_parts.append("Booking.com")
+    st.caption(f"Asistente IA ({' + '.join(mode_parts)})")
 
     # ─── Layout dos columnas ───
     col_list, col_chat = st.columns([0.3, 0.7])
@@ -168,6 +172,9 @@ try:
                 elif msg_type == "card":
                     st.markdown("He encontrado esta opcion para ti:")
                     render_rich_card(msg["content"])
+
+                elif msg_type == "hotel_results":
+                    render_hotel_results(msg["content"])
 
                 elif msg_type == "confirmation":
                     action_data = msg["content"]

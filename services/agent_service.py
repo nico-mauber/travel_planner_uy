@@ -3,9 +3,12 @@
 import os
 import uuid
 import re
+import logging
 from typing import Optional
 
 from config.settings import ItemType, ItemStatus
+
+logger = logging.getLogger(__name__)
 
 # ─── Detectar si el LLM está disponible ───
 _USE_LLM = bool(os.environ.get("GOOGLE_API_KEY"))
@@ -17,10 +20,37 @@ if _USE_LLM:
     except ImportError:
         _USE_LLM = False
 
+# ─── Detectar si Booking.com está disponible ───
+_USE_BOOKING = False
+try:
+    from services.booking_service import (
+        is_booking_available, search_hotels_for_trip, format_hotels_as_cards,
+    )
+    _USE_BOOKING = is_booking_available()
+except ImportError:
+    pass
+
+_HOTEL_KEYWORDS = [
+    "hotel", "hoteles", "alojamiento", "hospedaje", "hostel",
+    "donde dormir", "donde alojar", "donde quedar",
+    "habitacion", "habitación", "reservar hotel",
+    "booking", "alojarnos", "hospedarnos",
+]
+
 
 def is_llm_active() -> bool:
     """Retorna True si el LLM está activo."""
     return _USE_LLM
+
+
+def is_booking_active() -> bool:
+    """Retorna True si Booking.com está disponible."""
+    return _USE_BOOKING
+
+
+def _detect_hotel_intent(msg: str) -> bool:
+    """Detecta si el mensaje tiene intencion de buscar hoteles."""
+    return any(kw in msg for kw in _HOTEL_KEYWORDS)
 
 
 def process_message(message: str, trip: Optional[dict] = None,
@@ -62,6 +92,42 @@ def process_message(message: str, trip: Optional[dict] = None,
     # Eliminar item — siempre confirmación
     if trip and any(w in msg for w in ["eliminar", "quitar", "elimina", "quita", "borrar"]):
         return _remove_item_response(msg, trip)
+
+    # ─── Busqueda de hoteles via Booking.com ───
+    if trip and _USE_BOOKING and _detect_hotel_intent(msg):
+        try:
+            hotels = search_hotels_for_trip(trip, limit=5)
+            if hotels:
+                cards = format_hotels_as_cards(hotels)
+                # Obtener respuesta contextual del LLM si esta disponible
+                llm_text = ""
+                if _USE_LLM:
+                    try:
+                        import streamlit as st
+                        user_profile = st.session_state.get("user_profile")
+                        llm_resp = process_message_llm(
+                            message, trip, user_profile,
+                            user_id=user_id, chat_id=chat_id,
+                        )
+                        llm_text = llm_resp.get("content", "")
+                    except Exception:
+                        pass
+
+                dest = trip.get("destination", "tu destino")
+                return {
+                    "role": "assistant",
+                    "type": "hotel_results",
+                    "content": {
+                        "text": llm_text or (
+                            f"Encontre estos hoteles en **{dest}** "
+                            f"para tus fechas ({trip.get('start_date', '')} — "
+                            f"{trip.get('end_date', '')}):"
+                        ),
+                        "hotels": cards,
+                    },
+                }
+        except Exception as e:
+            logger.warning("Error en busqueda Booking.com: %s", e)
 
     # ─── Para todo lo demás, usar LLM si disponible ───
     if _USE_LLM:

@@ -38,6 +38,9 @@ def render_donut_chart(budget_summary: dict) -> None:
         showlegend=False,
         margin=dict(t=20, b=20, l=20, r=20),
         height=350,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#E0E0E0",
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -83,6 +86,9 @@ def render_comparison_bars(budget_summary: dict) -> None:
         height=350,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         yaxis_title="USD",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#E0E0E0",
     )
 
     st.plotly_chart(fig, use_container_width=True)
