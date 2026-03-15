@@ -581,7 +581,7 @@
   },
   {
     "id": "trip-001",
-    "user_id": "user-da3297fc",
+    "user_id": "user-3063b16a",
     "name": "Aventura en Tokio",
     "destination": "Tokio, Japón",
     "start_date": "2026-04-10",
@@ -849,7 +849,7 @@
   },
   {
     "id": "trip-002",
-    "user_id": "user-da3297fc",
+    "user_id": "user-3063b16a",
     "name": "Barcelona Cultural",
     "destination": "Barcelona, España",
     "start_date": "2026-05-20",
@@ -1032,7 +1032,7 @@
   },
   {
     "id": "trip-003",
-    "user_id": "user-da3297fc",
+    "user_id": "user-3063b16a",
     "name": "Escapada a Lima",
     "destination": "Lima, Perú",
     "start_date": "2026-02-05",
@@ -1164,7 +1164,7 @@
   },
   {
     "id": "trip-001",
-    "user_id": "user-3063b16a",
+    "user_id": "user-da3297fc",
     "name": "Aventura en Tokio",
     "destination": "Tokio, Japón",
     "start_date": "2026-04-10",
@@ -1432,7 +1432,7 @@
   },
   {
     "id": "trip-002",
-    "user_id": "user-3063b16a",
+    "user_id": "user-da3297fc",
     "name": "Barcelona Cultural",
     "destination": "Barcelona, España",
     "start_date": "2026-05-20",
@@ -1615,7 +1615,7 @@
   },
   {
     "id": "trip-003",
-    "user_id": "user-3063b16a",
+    "user_id": "user-da3297fc",
     "name": "Escapada a Lima",
     "destination": "Lima, Perú",
     "start_date": "2026-02-05",
@@ -1744,5 +1744,17 @@
         "provider": "LATAM"
       }
     ]
+  },
+  {
+    "id": "trip-cb8b6ee8",
+    "user_id": "user-da3297fc",
+    "name": "Uuruguay 2026",
+    "destination": "Montevideo 2026",
+    "start_date": "2026-04-23",
+    "end_date": "2026-04-30",
+    "status": "en_planificacion",
+    "budget_total": 0.0,
+    "items": [],
+    "notes": ""
   }
 ]

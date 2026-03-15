@@ -1,4 +1,4 @@
-"""Servicio del agente — LLM (Gemini) con fallback a pattern matching mock."""
+"""Servicio del agente — LLM (Gemini) + Booking.com. Sin fallback mock."""
 
 import os
 import uuid
@@ -56,16 +56,16 @@ def _detect_hotel_intent(msg: str) -> bool:
 def process_message(message: str, trip: Optional[dict] = None,
                     user_id: Optional[str] = None,
                     chat_id: Optional[str] = None) -> dict:
-    """Procesa un mensaje del usuario. Usa LLM si disponible, sino mock.
+    """Procesa un mensaje del usuario via LLM y/o Booking.com.
 
     Retorna dict con:
       - role: "assistant"
-      - type: "text" | "card" | "confirmation"
+      - type: "text" | "card" | "confirmation" | "hotel_results"
       - content: str (texto) o dict (datos de tarjeta/confirmación)
     """
     msg = message.lower().strip()
 
-    # ─── Acciones que SIEMPRE pasan por el mock (requieren confirmación UI) ───
+    # ─── Acciones que requieren confirmación UI ───
 
     # Sin viaje activo — crear viaje
     if trip is None:
@@ -129,7 +129,7 @@ def process_message(message: str, trip: Optional[dict] = None,
         except Exception as e:
             logger.warning("Error en busqueda Booking.com: %s", e)
 
-    # ─── Para todo lo demás, usar LLM si disponible ───
+    # ─── LLM (Gemini) ───
     if _USE_LLM:
         try:
             import streamlit as st
@@ -138,137 +138,25 @@ def process_message(message: str, trip: Optional[dict] = None,
                 message, trip, user_profile,
                 user_id=user_id, chat_id=chat_id,
             )
-        except Exception:
-            pass  # Fallback al mock
+        except Exception as e:
+            logger.warning("Error en LLM: %s", e)
+            return {
+                "role": "assistant",
+                "type": "text",
+                "content": "Hubo un error al procesar tu mensaje. Por favor, intenta de nuevo.",
+            }
 
-    # ─── Fallback: pattern matching mock ───
-    return _mock_process_message(msg, trip)
-
-
-def _mock_process_message(msg: str, trip: Optional[dict]) -> dict:
-    """Procesamiento mock por pattern matching."""
-    if trip is None:
-        return {
-            "role": "assistant",
-            "type": "text",
-            "content": (
-                "¡Hola! Soy tu asistente de viajes. "
-                "Para empezar, dime a dónde te gustaría viajar. "
-                'Por ejemplo: "Quiero viajar a París en mayo".'
-            ),
-        }
-
-    if any(w in msg for w in ["vuelo", "volar", "avión", "avion"]):
-        return _flight_response(trip)
-
-    if any(w in msg for w in ["hotel", "alojamiento", "hospedaje", "hostel"]):
-        return _hotel_response(trip)
-
-    if any(w in msg for w in ["actividad", "visitar", "conocer", "museo", "tour"]):
-        return _activity_response(trip)
-
-    if any(w in msg for w in ["restaurante", "comer", "cenar", "almorzar", "comida"]):
-        return _food_response(trip)
-
-    if any(w in msg for w in ["presupuesto", "costo", "precio", "cuánto", "cuanto"]):
-        return _budget_response(trip)
-
-    if any(w in msg for w in ["clima", "tiempo", "temperatura"]):
-        return _weather_response(trip)
-
-    if any(w in msg for w in ["hola", "hi", "buenas", "buen dia", "buenos dias"]):
-        return {
-            "role": "assistant",
-            "type": "text",
-            "content": (
-                f"¡Hola! Estoy aquí para ayudarte con tu viaje a "
-                f"{trip['destination']}. Puedo buscar vuelos, hoteles, "
-                f"actividades, restaurantes, o modificar tu itinerario. "
-                f"¿En qué te puedo ayudar?"
-            ),
-        }
-
+    # ─── Sin LLM configurado ───
     return {
         "role": "assistant",
         "type": "text",
         "content": (
-            f"Entiendo. Estoy trabajando en tu viaje a {trip['destination']}. "
-            "Puedo ayudarte con:\n"
-            "- Buscar **vuelos** o **alojamiento**\n"
-            "- Sugerir **actividades** o **restaurantes**\n"
-            "- **Agregar** o **eliminar** items del itinerario\n"
-            "- Consultar **presupuesto** o **clima**\n\n"
-            "¿Qué te gustaría hacer?"
+            "El asistente IA no esta disponible. "
+            "Configura `GOOGLE_API_KEY` en el archivo `.env` para habilitar Gemini.\n\n"
+            "Mientras tanto, puedes:\n"
+            "- Crear viajes desde **Mis Viajes**\n"
+            "- Gestionar tu itinerario desde las secciones de la barra lateral"
         ),
-    }
-
-
-def _flight_response(trip: dict) -> dict:
-    dest = trip["destination"]
-    return {
-        "role": "assistant",
-        "type": "card",
-        "content": {
-            "card_type": "flight",
-            "name": f"Vuelo directo a {dest}",
-            "provider": "LATAM Airlines",
-            "price": 650.0,
-            "departure": "08:00",
-            "arrival": "14:30",
-            "duration": "6h 30m",
-            "notes": f"Vuelo directo Montevideo → {dest}",
-        },
-    }
-
-
-def _hotel_response(trip: dict) -> dict:
-    dest = trip["destination"]
-    return {
-        "role": "assistant",
-        "type": "card",
-        "content": {
-            "card_type": "hotel",
-            "name": f"Hotel Boutique {dest.split(',')[0]}",
-            "provider": "Booking.com",
-            "price": 120.0,
-            "location": f"Centro de {dest.split(',')[0]}",
-            "rating": "4.5 ★",
-            "notes": "Habitación doble con desayuno incluido",
-        },
-    }
-
-
-def _activity_response(trip: dict) -> dict:
-    dest = trip["destination"]
-    return {
-        "role": "assistant",
-        "type": "card",
-        "content": {
-            "card_type": "activity",
-            "name": f"Tour cultural por {dest.split(',')[0]}",
-            "provider": "GetYourGuide",
-            "price": 35.0,
-            "duration": "3 horas",
-            "location": f"Centro histórico de {dest.split(',')[0]}",
-            "notes": "Tour guiado en español — incluye entradas a monumentos principales",
-        },
-    }
-
-
-def _food_response(trip: dict) -> dict:
-    dest = trip["destination"]
-    return {
-        "role": "assistant",
-        "type": "card",
-        "content": {
-            "card_type": "food",
-            "name": f"Restaurante típico de {dest.split(',')[0]}",
-            "provider": "TripAdvisor",
-            "price": 30.0,
-            "location": f"Zona gastronómica de {dest.split(',')[0]}",
-            "rating": "4.3 ★",
-            "notes": "Cocina local auténtica — reservas recomendadas",
-        },
     }
 
 
@@ -293,7 +181,6 @@ def _add_item_response(msg: str, trip: dict) -> dict:
 
 
 def _remove_item_response(msg: str, trip: dict) -> dict:
-    # Intentar encontrar qué item quiere eliminar
     items = trip.get("items", [])
     if items:
         last_item = items[-1]
@@ -313,38 +200,6 @@ def _remove_item_response(msg: str, trip: dict) -> dict:
         "role": "assistant",
         "type": "text",
         "content": "No hay items en el itinerario para eliminar.",
-    }
-
-
-def _budget_response(trip: dict) -> dict:
-    total = sum(
-        item.get("cost_estimated", 0)
-        for item in trip.get("items", [])
-        if item.get("status") != ItemStatus.SUGGESTED.value
-    )
-    return {
-        "role": "assistant",
-        "type": "text",
-        "content": (
-            f"El presupuesto estimado total de tu viaje a {trip['destination']} "
-            f"es de **USD {total:,.0f}**.\n\n"
-            "Puedes ver el desglose completo en la sección de Presupuesto."
-        ),
-    }
-
-
-def _weather_response(trip: dict) -> dict:
-    from services.weather_service import get_weather
-    weather = get_weather(trip["destination"])
-    return {
-        "role": "assistant",
-        "type": "text",
-        "content": (
-            f"{weather['icon']} **Clima en {trip['destination']}**\n\n"
-            f"Temperatura: {weather['temp_min']}°C — {weather['temp_max']}°C\n"
-            f"Condición: {weather['condition']}\n"
-            f"{weather['description']}"
-        ),
     }
 
 

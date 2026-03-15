@@ -1,48 +1,42 @@
-"""Servicio de gestion de conversaciones multiples."""
+"""Servicio de gestion de conversaciones multiples — Supabase backend."""
 
-import json
-import os
 import uuid
 from datetime import datetime
 from typing import Optional
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-CHATS_FILE = os.path.join(DATA_DIR, "chats.json")
-
-
-def _load_all_chats() -> list:
-    """Carga todos los chats desde JSON."""
-    try:
-        with open(CHATS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                return data
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    return []
-
-
-def save_chats(chats: list) -> None:
-    """Persiste todos los chats en JSON."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(CHATS_FILE, "w", encoding="utf-8") as f:
-        json.dump(chats, f, ensure_ascii=False, indent=2)
-
 
 def load_chats(user_id: str) -> list:
-    """Carga chats de un usuario, ordenados por last_activity_at desc."""
-    all_chats = _load_all_chats()
-    user_chats = [c for c in all_chats if c.get("user_id") == user_id]
-    user_chats.sort(key=lambda c: c.get("last_activity_at", ""), reverse=True)
-    return user_chats
+    """Carga chats de un usuario desde Supabase, ordenados por last_activity_at desc."""
+    from services.supabase_client import get_supabase_client
+
+    sb = get_supabase_client()
+    result = sb.table("chats").select("*").eq("user_id", user_id).order(
+        "last_activity_at", desc=True
+    ).execute()
+
+    chats = []
+    for row in (result.data or []):
+        chat = _row_to_chat(row)
+        # Cargar mensajes de este chat
+        msgs_result = sb.table("chat_messages").select("*").eq(
+            "chat_id", row["chat_id"]
+        ).order("sort_order").execute()
+        chat["messages"] = [_row_to_message(m) for m in (msgs_result.data or [])]
+        chats.append(chat)
+
+    return chats
 
 
 def create_chat(user_id: str, trip_id: Optional[str] = None,
                 title: str = "Nueva conversacion") -> dict:
-    """Crea un nuevo chat. ID formato chat-{hex8}."""
+    """Crea un nuevo chat. Persiste en Supabase."""
+    from services.supabase_client import get_supabase_client
+
     now = datetime.now().isoformat()
+    chat_id = f"chat-{uuid.uuid4().hex[:8]}"
+
     new_chat = {
-        "chat_id": f"chat-{uuid.uuid4().hex[:8]}",
+        "chat_id": chat_id,
         "user_id": user_id,
         "trip_id": trip_id,
         "title": title,
@@ -50,9 +44,15 @@ def create_chat(user_id: str, trip_id: Optional[str] = None,
         "last_activity_at": now,
         "messages": [],
     }
-    all_chats = _load_all_chats()
-    all_chats.append(new_chat)
-    save_chats(all_chats)
+
+    sb = get_supabase_client()
+    chat_row = {
+        "chat_id": chat_id,
+        "user_id": user_id,
+        "trip_id": trip_id,
+        "title": title,
+    }
+    sb.table("chats").insert(chat_row).execute()
     return new_chat
 
 
@@ -65,46 +65,96 @@ def get_chat_by_id(chats: list, chat_id: str) -> Optional[dict]:
 
 
 def delete_chat(chat_id: str, user_id: str = None) -> bool:
-    """Elimina un chat por ID. Verifica ownership si user_id proporcionado."""
-    all_chats = _load_all_chats()
-    for i, chat in enumerate(all_chats):
-        if chat["chat_id"] == chat_id:
-            if user_id and chat.get("user_id") != user_id:
-                return False  # No pertenece al usuario
-            all_chats.pop(i)
-            save_chats(all_chats)
-            return True
-    return False
+    """Elimina un chat por ID. CASCADE elimina mensajes."""
+    from services.supabase_client import get_supabase_client
+
+    sb = get_supabase_client()
+
+    if user_id:
+        # Verificar ownership
+        result = sb.table("chats").select("user_id").eq("chat_id", chat_id).execute()
+        if result.data and result.data[0].get("user_id") != user_id:
+            return False
+
+    sb.table("chats").delete().eq("chat_id", chat_id).execute()
+    return True
 
 
 def rename_chat(chat_id: str, new_title: str) -> bool:
-    """Renombra un chat. Retorna True si exitoso."""
-    all_chats = _load_all_chats()
-    for chat in all_chats:
-        if chat["chat_id"] == chat_id:
-            chat["title"] = new_title
-            save_chats(all_chats)
-            return True
-    return False
+    """Renombra un chat en Supabase. Retorna True si exitoso."""
+    from services.supabase_client import get_supabase_client
+
+    try:
+        sb = get_supabase_client()
+        sb.table("chats").update({"title": new_title}).eq("chat_id", chat_id).execute()
+        return True
+    except Exception:
+        return False
 
 
 def add_message(chat: dict, message: dict) -> None:
-    """Agrega un mensaje al chat y actualiza last_activity_at."""
+    """Agrega un mensaje al chat en memoria y persiste en Supabase."""
+    from services.supabase_client import get_supabase_client
+
     chat["messages"].append(message)
-    chat["last_activity_at"] = datetime.now().isoformat()
+    now = datetime.now().isoformat()
+    chat["last_activity_at"] = now
+
+    sb = get_supabase_client()
+
+    # Calcular sort_order
+    sort_order = len(chat["messages"]) - 1
+
+    # Preparar content para JSONB
+    content = message.get("content", "")
+
+    msg_row = {
+        "chat_id": chat["chat_id"],
+        "role": message.get("role", "assistant"),
+        "msg_type": message.get("type", "text"),
+        "content": content,  # supabase-py serializa a JSONB automáticamente
+        "processed": message.get("processed", False),
+        "result": message.get("result"),
+        "sort_order": sort_order,
+    }
+    sb.table("chat_messages").insert(msg_row).execute()
+
+    # Actualizar last_activity_at del chat
+    sb.table("chats").update({"last_activity_at": now}).eq("chat_id", chat["chat_id"]).execute()
 
 
 def persist_chat(chat: dict) -> None:
-    """Persiste un chat individual actualizandolo en el archivo global."""
-    all_chats = _load_all_chats()
-    for i, c in enumerate(all_chats):
-        if c["chat_id"] == chat["chat_id"]:
-            all_chats[i] = chat
-            save_chats(all_chats)
-            return
-    # Si no existe, agregarlo
-    all_chats.append(chat)
-    save_chats(all_chats)
+    """Persiste el estado actual de un chat en Supabase.
+
+    Sincroniza mensajes: borra todos los existentes y re-inserta.
+    Esto maneja correctamente cambios en mensajes (ej: processed=True).
+    """
+    from services.supabase_client import get_supabase_client
+
+    sb = get_supabase_client()
+    chat_id = chat["chat_id"]
+
+    # Actualizar metadatos del chat
+    sb.table("chats").update({
+        "title": chat.get("title", "Nueva conversacion"),
+        "last_activity_at": chat.get("last_activity_at", datetime.now().isoformat()),
+    }).eq("chat_id", chat_id).execute()
+
+    # Re-sincronizar mensajes: borrar y reinsertar
+    sb.table("chat_messages").delete().eq("chat_id", chat_id).execute()
+
+    for idx, msg in enumerate(chat.get("messages", [])):
+        content = msg.get("content", "")
+        msg_row = {
+            "chat_id": chat_id,
+            "role": msg.get("role", "assistant"),
+            "msg_type": msg.get("type", "text"),
+            "content": content,
+            "processed": msg.get("processed", False),
+            "result": msg.get("result"),
+            "sort_order": idx,
+        }
+        sb.table("chat_messages").insert(msg_row).execute()
 
 
 def auto_generate_title(first_message: str) -> str:
@@ -113,3 +163,39 @@ def auto_generate_title(first_message: str) -> str:
     if len(clean) <= 50:
         return clean
     return clean[:47] + "..."
+
+
+# ─── Helpers de conversión ───
+
+def _row_to_chat(row: dict) -> dict:
+    """Convierte un row de chats de Supabase a dict de la app."""
+    return {
+        "chat_id": row["chat_id"],
+        "user_id": row.get("user_id", ""),
+        "trip_id": row.get("trip_id"),
+        "title": row.get("title", "Nueva conversacion"),
+        "created_at": str(row.get("created_at", "")),
+        "last_activity_at": str(row.get("last_activity_at", "")),
+        "messages": [],  # se cargan por separado
+    }
+
+
+def _row_to_message(row: dict) -> dict:
+    """Convierte un row de chat_messages de Supabase a dict de la app."""
+    content = row.get("content", "")
+    # JSONB: si viene como string JSON, dejarlo como está
+    # Si es un dict/list, dejarlo como dict/list
+    # El campo content en la app puede ser str (para text) o dict (para card/confirmation)
+
+    msg = {
+        "role": row.get("role", "assistant"),
+        "type": row.get("msg_type", "text"),
+        "content": content,
+    }
+
+    if row.get("processed"):
+        msg["processed"] = True
+    if row.get("result"):
+        msg["result"] = row["result"]
+
+    return msg

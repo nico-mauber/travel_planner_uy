@@ -5,7 +5,6 @@ from datetime import date
 
 from config.settings import TripStatus, ItemStatus, TRIP_STATUS_LABELS
 from services.trip_service import get_active_trip
-from services.weather_service import get_weather
 from services.budget_service import calculate_budget_summary, calculate_planning_progress
 from services.feedback_service import has_pending_feedback
 from components.alert_banner import get_alerts, render_alerts
@@ -67,28 +66,14 @@ try:
 
     st.markdown("---")
 
-    # ─── Fila 2: Progreso + Clima ───
-    col_prog, col_weather = st.columns(2)
+    # ─── Fila 2: Progreso ───
+    st.subheader("📈 Progreso de planificación")
+    progress = calculate_planning_progress(items)
+    st.progress(progress, text=f"{progress * 100:.0f}% completado")
 
-    with col_prog:
-        st.subheader("📈 Progreso de planificación")
-        progress = calculate_planning_progress(items)
-        st.progress(progress, text=f"{progress * 100:.0f}% completado")
-
-        status_label = TRIP_STATUS_LABELS.get(TripStatus(trip["status"]), trip["status"])
-        st.caption(f"Estado del viaje: **{status_label}**")
-
-        total_days = (date.fromisoformat(trip["end_date"]) - start_date).days + 1
-        st.caption(f"Duración: **{total_days} días**")
-
-    with col_weather:
-        st.subheader("🌤️ Clima en destino")
-        weather = get_weather(trip["destination"])
-        st.markdown(
-            f"### {weather['icon']} {weather['condition']}\n\n"
-            f"🌡️ **{weather['temp_min']}°C** — **{weather['temp_max']}°C**\n\n"
-            f"{weather['description']}"
-        )
+    status_label = TRIP_STATUS_LABELS.get(TripStatus(trip["status"]), trip["status"])
+    total_days = (date.fromisoformat(trip["end_date"]) - start_date).days + 1
+    st.caption(f"Estado: **{status_label}** — Duración: **{total_days} días**")
 
     st.markdown("---")
 

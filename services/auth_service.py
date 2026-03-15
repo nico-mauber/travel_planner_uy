@@ -1,7 +1,5 @@
-"""Servicio de autenticacion y gestion de usuarios."""
+"""Servicio de autenticacion y gestion de usuarios — Supabase backend."""
 
-import json
-import os
 import sys
 import uuid
 from datetime import datetime
@@ -10,9 +8,6 @@ from typing import Optional
 import streamlit as st
 
 from config.settings import DEMO_USER_ID
-
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-USERS_FILE = os.path.join(DATA_DIR, "users.json")
 
 # Verificar si Authlib esta disponible al importar el modulo
 _AUTHLIB_AVAILABLE = False
@@ -39,45 +34,51 @@ def is_auth_enabled() -> bool:
         return False
 
 
-def load_users() -> list:
-    """Carga usuarios desde JSON."""
-    try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                return data
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    return []
-
-
-def save_users(users: list) -> None:
-    """Persiste usuarios en JSON."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
-
-
 def get_or_create_user(email: str, name: str, picture: str = "") -> dict:
-    """Busca usuario por email; si no existe, lo crea con user-{hex8}."""
-    users = load_users()
-    for user in users:
-        if user["email"] == email:
-            user["last_login"] = datetime.now().isoformat()
-            save_users(users)
-            return user
+    """Busca usuario por email; si no existe, lo crea con user-{hex8}. Persiste en Supabase."""
+    from services.supabase_client import get_supabase_client
 
+    sb = get_supabase_client()
+    now = datetime.now().isoformat()
+
+    # Buscar por email
+    result = sb.table("users").select("*").eq("email", email).execute()
+    if result.data:
+        user = result.data[0]
+        # Actualizar last_login
+        sb.table("users").update({"last_login": now}).eq("user_id", user["user_id"]).execute()
+        user["last_login"] = now
+        return user
+
+    # Crear nuevo usuario
     new_user = {
         "user_id": f"user-{uuid.uuid4().hex[:8]}",
         "email": email,
         "name": name,
         "picture": picture,
-        "created_at": datetime.now().isoformat(),
-        "last_login": datetime.now().isoformat(),
+        "created_at": now,
+        "last_login": now,
     }
-    users.append(new_user)
-    save_users(users)
+    sb.table("users").insert(new_user).execute()
     return new_user
+
+
+def ensure_user_exists(user_id: str) -> None:
+    """Asegura que un user_id exista en la tabla users (para el usuario demo u otros)."""
+    from services.supabase_client import get_supabase_client
+
+    sb = get_supabase_client()
+    result = sb.table("users").select("user_id").eq("user_id", user_id).execute()
+    if not result.data:
+        now = datetime.now().isoformat()
+        sb.table("users").insert({
+            "user_id": user_id,
+            "email": f"{user_id}@demo.local",
+            "name": "Usuario Demo",
+            "picture": "",
+            "created_at": now,
+            "last_login": now,
+        }).execute()
 
 
 def get_current_user_id() -> str:

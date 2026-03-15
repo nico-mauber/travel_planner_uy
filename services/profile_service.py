@@ -1,66 +1,72 @@
-"""Servicio de gestión de perfil de usuario."""
+"""Servicio de gestión de perfil de usuario — Supabase backend."""
 
-import json
-import os
 from typing import Optional
 
-from data.sample_data import get_sample_profile
 from config.settings import DEMO_USER_ID
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-PROFILES_FILE = os.path.join(DATA_DIR, "profiles.json")
+_EMPTY_PROFILE = {
+    "accommodation_types": [],
+    "food_restrictions": [],
+    "allergies": "",
+    "travel_styles": [],
+    "daily_budget": 0.0,
+    "preferred_airlines": "",
+    "preferred_hotel_chains": "",
+}
 
 
-def _load_all_profiles() -> dict:
-    """Carga todos los perfiles como dict keyed por user_id."""
+def load_profile(user_id: Optional[str] = None) -> dict:
+    """Carga perfil para un user_id desde Supabase. Si no existe, crea uno vacio."""
+    from services.supabase_client import get_supabase_client
+    from services.auth_service import ensure_user_exists
+
+    uid = user_id or DEMO_USER_ID
+    sb = get_supabase_client()
+
+    result = sb.table("profiles").select("*").eq("user_id", uid).execute()
+    if result.data:
+        row = result.data[0]
+        return {
+            "accommodation_types": row.get("accommodation_types") or [],
+            "food_restrictions": row.get("food_restrictions") or [],
+            "allergies": row.get("allergies") or "",
+            "travel_styles": row.get("travel_styles") or [],
+            "daily_budget": float(row.get("daily_budget") or 0.0),
+            "preferred_airlines": row.get("preferred_airlines") or "",
+            "preferred_hotel_chains": row.get("preferred_hotel_chains") or "",
+        }
+
+    # No existe: crear perfil vacio
+    ensure_user_exists(uid)
+    _upsert_profile(sb, uid, _EMPTY_PROFILE)
+    return dict(_EMPTY_PROFILE)
+
+
+def save_profile(profile: dict, user_id: Optional[str] = None) -> bool:
+    """Persiste perfil para un user_id en Supabase. Retorna True si exitoso."""
+    from services.supabase_client import get_supabase_client
+    from services.auth_service import ensure_user_exists
+
+    uid = user_id or DEMO_USER_ID
+    sb = get_supabase_client()
+    ensure_user_exists(uid)
     try:
-        with open(PROFILES_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                # Detectar formato legacy (dict plano con keys de perfil, no user_ids)
-                if "accommodation_types" in data or "travel_styles" in data:
-                    migrated = {DEMO_USER_ID: data}
-                    _save_all_profiles(migrated)
-                    return migrated
-                # Formato nuevo (keyed por user_id)
-                return data
-            if isinstance(data, list):
-                # Formato legacy (lista) — no deberia ocurrir, pero manejar
-                return {DEMO_USER_ID: data[0]} if data else {}
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    return {}
-
-
-def _save_all_profiles(profiles: dict) -> bool:
-    """Persiste todos los perfiles en JSON."""
-    try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(PROFILES_FILE, "w", encoding="utf-8") as f:
-            json.dump(profiles, f, ensure_ascii=False, indent=2)
+        _upsert_profile(sb, uid, profile)
         return True
     except Exception:
         return False
 
 
-def load_profile(user_id: Optional[str] = None) -> dict:
-    """Carga perfil para un user_id. Si no existe, carga datos de ejemplo."""
-    uid = user_id or DEMO_USER_ID
-    all_profiles = _load_all_profiles()
-
-    if uid in all_profiles and all_profiles[uid]:
-        return all_profiles[uid]
-
-    # Crear perfil de ejemplo para este usuario
-    sample = get_sample_profile()
-    all_profiles[uid] = sample
-    _save_all_profiles(all_profiles)
-    return sample
-
-
-def save_profile(profile: dict, user_id: Optional[str] = None) -> bool:
-    """Persiste perfil para un user_id. Retorna True si exitoso."""
-    uid = user_id or DEMO_USER_ID
-    all_profiles = _load_all_profiles()
-    all_profiles[uid] = profile
-    return _save_all_profiles(all_profiles)
+def _upsert_profile(sb, user_id: str, profile: dict) -> None:
+    """Upsert de perfil en Supabase."""
+    row = {
+        "user_id": user_id,
+        "accommodation_types": profile.get("accommodation_types", []),
+        "food_restrictions": profile.get("food_restrictions", []),
+        "allergies": profile.get("allergies", ""),
+        "travel_styles": profile.get("travel_styles", []),
+        "daily_budget": float(profile.get("daily_budget", 0.0)),
+        "preferred_airlines": profile.get("preferred_airlines", ""),
+        "preferred_hotel_chains": profile.get("preferred_hotel_chains", ""),
+    }
+    sb.table("profiles").upsert(row, on_conflict="user_id").execute()

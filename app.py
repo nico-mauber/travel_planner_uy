@@ -9,7 +9,7 @@ load_dotenv()
 import streamlit as st
 
 from config.settings import TRIP_STATUS_LABELS, TripStatus
-from services.trip_service import load_trips, get_active_trip, update_trip_statuses, save_trips_for_user
+from services.trip_service import load_trips, get_active_trip, update_trip_statuses
 from services.auth_service import is_auth_enabled, require_auth, get_current_user_id
 from services.chat_service import load_chats
 
@@ -64,6 +64,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ─── Verificar conexión Supabase ───
+from services.supabase_client import is_supabase_available
+if not is_supabase_available():
+    st.error(
+        "**No se pudo conectar a Supabase.** Verifica que las variables "
+        "`SUPABASE_URL` y `SUPABASE_SERVICE_KEY` estén configuradas en `.env` "
+        "y que el schema haya sido creado en Supabase."
+    )
+    st.stop()
+
 # ─── Verificar entorno ───
 from services.auth_service import _AUTHLIB_AVAILABLE, _PYTHON_EXECUTABLE
 if not _AUTHLIB_AVAILABLE:
@@ -117,9 +127,8 @@ if "user_profile" not in st.session_state:
     from services.profile_service import load_profile
     st.session_state.user_profile = load_profile(user_id=current_user_id)
 
-# ─── Actualizar estados por fecha (solo persistir si hubo cambios) ───
-if update_trip_statuses(st.session_state.trips):
-    save_trips_for_user(st.session_state.trips, current_user_id)
+# ─── Actualizar estados por fecha (persiste automaticamente en Supabase) ───
+update_trip_statuses(st.session_state.trips)
 
 # ─── Navegación ───
 pages = [

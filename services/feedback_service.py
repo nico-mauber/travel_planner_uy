@@ -1,52 +1,64 @@
-"""Servicio de retroalimentación post-viaje."""
-
-import json
-import os
-
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-FEEDBACK_FILE = os.path.join(DATA_DIR, "feedbacks.json")
-
-
-def load_feedbacks() -> dict:
-    """Carga feedbacks desde JSON. Clave = trip_id."""
-    try:
-        with open(FEEDBACK_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+"""Servicio de retroalimentación post-viaje — Supabase backend."""
 
 
 def save_feedback(trip_id: str, feedback: dict) -> bool:
-    """Guarda feedback para un viaje."""
+    """Guarda feedback para un viaje en Supabase (upsert por trip_id)."""
+    from services.supabase_client import get_supabase_client
+
     try:
-        feedbacks = load_feedbacks()
-        feedbacks[trip_id] = feedback
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(FEEDBACK_FILE, "w", encoding="utf-8") as f:
-            json.dump(feedbacks, f, ensure_ascii=False, indent=2)
+        sb = get_supabase_client()
+        row = {
+            "trip_id": trip_id,
+            "overall_rating": int(feedback.get("overall_rating", 0)),
+            "comment": feedback.get("comment", ""),
+            "item_feedbacks": feedback.get("item_feedbacks", []),
+            "skipped": feedback.get("skipped", False),
+        }
+        sb.table("feedbacks").upsert(row, on_conflict="trip_id").execute()
         return True
     except Exception:
         return False
 
 
 def has_feedback(trip_id: str) -> bool:
-    """Verifica si un viaje tiene feedback."""
-    feedbacks = load_feedbacks()
-    return trip_id in feedbacks
+    """Verifica si un viaje tiene feedback en Supabase."""
+    from services.supabase_client import get_supabase_client
+
+    try:
+        sb = get_supabase_client()
+        result = sb.table("feedbacks").select("trip_id").eq("trip_id", trip_id).execute()
+        return bool(result.data)
+    except Exception:
+        return False
 
 
 def get_feedback(trip_id: str) -> dict:
-    """Obtiene feedback de un viaje."""
-    feedbacks = load_feedbacks()
-    return feedbacks.get(trip_id, {})
+    """Obtiene feedback de un viaje desde Supabase."""
+    from services.supabase_client import get_supabase_client
+
+    try:
+        sb = get_supabase_client()
+        result = sb.table("feedbacks").select("*").eq("trip_id", trip_id).execute()
+        if result.data:
+            row = result.data[0]
+            return {
+                "trip_id": row["trip_id"],
+                "overall_rating": row.get("overall_rating", 0),
+                "comment": row.get("comment", ""),
+                "item_feedbacks": row.get("item_feedbacks", []),
+                "skipped": row.get("skipped", False),
+            }
+    except Exception:
+        pass
+    return {}
 
 
 def has_pending_feedback(trips: list) -> bool:
     """Verifica si hay viajes completados sin feedback."""
     from config.settings import TripStatus
-    feedbacks = load_feedbacks()
+
     for trip in trips:
-        if trip["status"] == TripStatus.COMPLETED.value and trip["id"] not in feedbacks:
+        if trip["status"] == TripStatus.COMPLETED.value and not has_feedback(trip["id"]):
             return True
     return False
 
@@ -54,8 +66,8 @@ def has_pending_feedback(trips: list) -> bool:
 def get_trips_pending_feedback(trips: list) -> list:
     """Retorna viajes completados sin feedback."""
     from config.settings import TripStatus
-    feedbacks = load_feedbacks()
+
     return [
         t for t in trips
-        if t["status"] == TripStatus.COMPLETED.value and t["id"] not in feedbacks
+        if t["status"] == TripStatus.COMPLETED.value and not has_feedback(t["id"])
     ]

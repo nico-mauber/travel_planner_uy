@@ -1,6 +1,7 @@
 """Servicio de busqueda de hoteles via RapidAPI — Booking.com (DataCrawler)."""
 
 import os
+import re
 import time
 import logging
 from typing import Optional
@@ -221,6 +222,16 @@ def search_hotels(
 
 # ─── Funciones de alto nivel ───
 
+def _clean_destination(destination: str) -> str:
+    """Limpia el nombre del destino para busqueda: quita años, numeros sueltos, etc."""
+    # Quitar años (4 digitos) y numeros sueltos
+    cleaned = re.sub(r'\b\d{4}\b', '', destination)
+    cleaned = re.sub(r'\b\d+\b', '', cleaned)
+    # Quitar espacios multiples
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
+
 def search_hotels_for_trip(
     trip: dict,
     query: str = "",
@@ -231,14 +242,18 @@ def search_hotels_for_trip(
     if not destination:
         return []
 
-    # Usar el destino del viaje para buscar
-    search_term = destination.split(",")[0].strip()
+    # Limpiar destino (quitar años, numeros) y tomar parte antes de la coma
+    clean_dest = _clean_destination(destination)
+    search_term = clean_dest.split(",")[0].strip()
+
+    if not search_term:
+        return []
 
     # Obtener dest_id
     destinations = search_destinations(search_term)
-    if not destinations and "," in destination:
-        # Reintentar con nombre completo
-        destinations = search_destinations(destination)
+    if not destinations and "," in clean_dest:
+        # Reintentar con nombre completo limpio
+        destinations = search_destinations(clean_dest)
     if not destinations:
         return []
 
