@@ -152,6 +152,13 @@ def process_message(message: str, trip: Optional[dict] = None,
     }
 
 
+def _is_same_destination(new_dest: str, current_dest: str) -> bool:
+    """Compara destinos para evitar duplicados (substring match)."""
+    if not new_dest or not current_dest:
+        return False
+    return new_dest == current_dest or new_dest in current_dest or current_dest in new_dest
+
+
 def _handle_trip_creation_flow(
     msg: str, original_message: str,
     trip: Optional[dict], draft: Optional[dict],
@@ -207,7 +214,19 @@ def _handle_trip_creation_flow(
         }
 
     # ─── Sin draft: detectar intención de crear viaje ───
-    if trip is None and detect_trip_creation_intent(msg):
+    if detect_trip_creation_intent(msg):
+        # Protección contra falsos positivos cuando hay viaje activo
+        if trip is not None:
+            tentative = extract_trip_data(original_message, new_draft())
+            new_dest = tentative.get("destination")
+            if not new_dest:
+                # No se detectó destino nuevo → no iniciar creación
+                return None
+            current_dest = (trip.get("destination") or "").lower().strip()
+            if _is_same_destination(new_dest.lower().strip(), current_dest):
+                # Mismo destino → no crear duplicado
+                return None
+
         draft = new_draft()
         updated = extract_trip_data(original_message, draft)
         updated["step"] = "collecting"

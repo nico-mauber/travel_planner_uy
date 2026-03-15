@@ -13,6 +13,23 @@ from services.chat_service import (
 from components.chat_widget import render_rich_card, render_confirmation, render_hotel_results
 
 
+def _find_trip_by_destination(msg_lower: str, trips: list):
+    """Busca un viaje cuyo destino sea mencionado en el mensaje (longest match)."""
+    best = None
+    best_len = 0
+    for t in trips:
+        dest = (t.get("destination") or "").strip()
+        if not dest:
+            continue
+        for part in [dest] + [p.strip() for p in dest.split(",")]:
+            pl = part.lower()
+            if len(pl) > 2 and pl in msg_lower:
+                if len(pl) > best_len:
+                    best = t
+                    best_len = len(pl)
+    return best
+
+
 try:
     trips = st.session_state.trips
     active_trip_id = st.session_state.get("active_trip_id")
@@ -136,26 +153,15 @@ try:
 
         # Mensaje de bienvenida si el chat esta vacio
         if not history:
-            welcome_msg = None
-            if chat_trip:
-                welcome_msg = {
-                    "role": "assistant",
-                    "type": "text",
-                    "content": (
-                        f"¡Hola! Estoy listo para ayudarte con tu viaje a "
-                        f"{chat_trip['destination']}. ¿En qué puedo ayudarte?"
-                    ),
-                }
-            else:
-                welcome_msg = {
-                    "role": "assistant",
-                    "type": "text",
-                    "content": (
-                        "¡Hola! Soy tu asistente de viajes. "
-                        "Dime a dónde te gustaría viajar para empezar a planificar. "
-                        'Por ejemplo: "Quiero viajar a París".'
-                    ),
-                }
+            welcome_msg = {
+                "role": "assistant",
+                "type": "text",
+                "content": (
+                    "¡Hola! Soy tu asistente de viajes. "
+                    "Puedo ayudarte a planificar viajes, buscar hoteles, "
+                    "organizar actividades y más. ¿En qué puedo ayudarte?"
+                ),
+            }
             add_message(active_chat, welcome_msg)
             persist_chat(active_chat)
             st.session_state.user_chats = load_chats(user_id)
@@ -202,10 +208,23 @@ try:
                                 # Asociar chat al nuevo viaje
                                 active_chat["trip_id"] = new_trip["id"]
                                 msg["processed"] = True
-                                msg["result"] = "Viaje creado"
+                                result_msg = (
+                                    f"✅ Viaje creado: **{new_trip['name']}** a {new_trip['destination']} "
+                                    f"({new_trip['start_date']} — {new_trip['end_date']})"
+                                )
+                                msg["result"] = result_msg
                                 st.session_state.trips = trips
                                 # Limpiar draft de creación
                                 st.session_state.pop("_trip_creation_draft", None)
+                                add_message(active_chat, {
+                                    "role": "assistant",
+                                    "type": "text",
+                                    "content": (
+                                        f"{result_msg}\n\n"
+                                        "El viaje ya está activo. Puedes verlo en **Mis Viajes** "
+                                        "o empezar a planificar aquí mismo."
+                                    ),
+                                })
                                 persist_chat(active_chat)
                                 st.session_state.user_chats = load_chats(user_id)
                             elif chat_trip:
@@ -254,6 +273,13 @@ try:
                 new_title = auto_generate_title(user_input)
                 active_chat["title"] = new_title
                 rename_chat(active_chat["chat_id"], new_title)
+
+            # Detectar contexto de viaje desde el mensaje
+            detected = _find_trip_by_destination(user_input.lower(), trips)
+            if detected and detected["id"] != (chat_trip or {}).get("id"):
+                chat_trip = detected
+                active_chat["trip_id"] = detected["id"]
+                st.session_state.active_trip_id = detected["id"]
 
             with st.spinner("El asistente esta procesando tu solicitud..."):
                 trip_creation_draft = st.session_state.get("_trip_creation_draft")

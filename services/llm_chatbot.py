@@ -53,6 +53,8 @@ INSTRUCCIONES:
 - Si el usuario pregunta por precios, da estimaciones razonables.
 - Si mencionan un destino específico, da información real y útil sobre ese lugar.
 - Si no hay viaje activo, pregunta a dónde quieren viajar.
+- NUNCA afirmes haber creado, modificado o eliminado un viaje o item del itinerario. Esas acciones las gestiona el sistema automáticamente. Si el usuario quiere crear un viaje nuevo, sugiérele que escriba algo como "quiero planificar un viaje a [destino]".
+- NUNCA uses frases como "he creado", "he agregado", "he eliminado" que impliquen haber ejecutado acciones sobre los datos.
 """
 
         self.message_trimmer = trim_messages(
