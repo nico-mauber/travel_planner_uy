@@ -93,9 +93,50 @@ _TIME_AM_PM = re.compile(
     re.IGNORECASE,
 )
 
+# ─── Regex para rango horario ("16:30 a 19:30", "de las 16:30 a las 19:30") ───
+_TIME_RANGE = re.compile(
+    r"(?:de\s+(?:las?\s+)?|para\s+(?:las?\s+)?|a\s+las?\s+)?(\d{1,2})[:\.](\d{2})\s*(?:a|[-–])\s*(?:las?\s+)?(\d{1,2})[:\.](\d{2})",
+    re.IGNORECASE,
+)
+
 # ─── Regex para dia relativo explicito ───
 _DAY_RELATIVE = re.compile(
     r"(?:el\s+)?dia\s+(\d{1,2})",
+    re.IGNORECASE,
+)
+
+# ─── Mapeo de ordinales en español ───
+_ORDINALS = {
+    "primero": 1, "primer": 1, "primera": 1,
+    "segundo": 2, "segunda": 2,
+    "tercero": 3, "tercer": 3, "tercera": 3,
+    "cuarto": 4, "cuarta": 4,
+    "quinto": 5, "quinta": 5,
+    "sexto": 6, "sexta": 6,
+    "septimo": 7, "séptimo": 7, "septima": 7, "séptima": 7,
+    "octavo": 8, "octava": 8,
+    "noveno": 9, "novena": 9,
+    "decimo": 10, "décimo": 10, "decima": 10, "décima": 10,
+}
+
+_ORDINAL_NAMES = "|".join(_ORDINALS.keys())
+
+# ─── Regex para dia ordinal en español ───
+# "el quinto dia", "en el tercer dia", "quinto dia de mi viaje"
+_DAY_ORDINAL = re.compile(
+    rf"(?:en\s+)?(?:el\s+)?({_ORDINAL_NAMES})\s+dia",
+    re.IGNORECASE,
+)
+
+# "dia quinto", "el dia tercero"
+_DAY_ORDINAL_INVERTED = re.compile(
+    rf"(?:el\s+)?dia\s+({_ORDINAL_NAMES})",
+    re.IGNORECASE,
+)
+
+# "ultimo dia", "penultimo dia"
+_DAY_RELATIVE_NAMED = re.compile(
+    r"(?:el\s+)?(ultimo|último|penultimo|penúltimo)\s+dia",
     re.IGNORECASE,
 )
 
@@ -172,6 +213,31 @@ def extract_time(msg: str) -> Optional[str]:
     return None
 
 
+def extract_time_range(msg: str) -> tuple:
+    """Extrae rango horario del mensaje. Retorna (start_time, end_time) o (None, None).
+
+    Soporta: "HH:MM a HH:MM", "HH:MM - HH:MM", "de HH:MM a HH:MM",
+    "de las HH:MM a las HH:MM", "para las HH:MM a las HH:MM".
+    Si solo hay un tiempo individual, retorna (start, None).
+    """
+    lower = msg.lower()
+
+    # 1. Rango explicito: "16:30 a 19:30", "de las 16:30 a las 19:30"
+    m = _TIME_RANGE.search(lower)
+    if m:
+        h1, m1 = int(m.group(1)), int(m.group(2))
+        h2, m2 = int(m.group(3)), int(m.group(4))
+        if 0 <= h1 <= 23 and 0 <= m1 <= 59 and 0 <= h2 <= 23 and 0 <= m2 <= 59:
+            return (f"{h1:02d}:{m1:02d}", f"{h2:02d}:{m2:02d}")
+
+    # 2. Tiempo individual (fallback a extract_time)
+    single = extract_time(msg)
+    if single:
+        return (single, None)
+
+    return (None, None)
+
+
 def extract_day_from_message(msg: str, trip: dict) -> Optional[int]:
     """Extrae dia relativo del viaje desde el mensaje (RN-002).
 
@@ -187,12 +253,42 @@ def extract_day_from_message(msg: str, trip: dict) -> Optional[int]:
     except ValueError:
         return None
 
-    # 1. Dia relativo explicito: "el dia 3", "dia 5"
+    # 1. Ordinal en español: "el quinto dia", "en el tercer dia"
+    m = _DAY_ORDINAL.search(lower)
+    if m:
+        day_num = _ORDINALS.get(m.group(1).lower())
+        if day_num:
+            return day_num
+
+    # 2. Ordinal invertido: "dia quinto", "el dia tercero"
+    m = _DAY_ORDINAL_INVERTED.search(lower)
+    if m:
+        day_num = _ORDINALS.get(m.group(1).lower())
+        if day_num:
+            return day_num
+
+    # 3. "ultimo dia", "penultimo dia" (requiere end_date)
+    m = _DAY_RELATIVE_NAMED.search(lower)
+    if m:
+        end_date_str = trip.get("end_date", "")
+        if end_date_str:
+            try:
+                end_date = date.fromisoformat(end_date_str)
+                total_days = (end_date - start_date).days + 1
+                word = m.group(1).lower()
+                if word in ("ultimo", "último"):
+                    return total_days
+                if word in ("penultimo", "penúltimo"):
+                    return max(1, total_days - 1)
+            except ValueError:
+                pass
+
+    # 4. Dia relativo explicito: "el dia 3", "dia 5"
     m = _DAY_RELATIVE.search(lower)
     if m:
         return int(m.group(1))
 
-    # 2. Fecha con nombre de mes: "el 15 de abril"
+    # 5. Fecha con nombre de mes: "el 15 de abril"
     m = _DATE_WITH_MONTH.search(lower)
     if m:
         day_num = int(m.group(1))
@@ -211,7 +307,7 @@ def extract_day_from_message(msg: str, trip: dict) -> Optional[int]:
             if delta >= 1:
                 return delta
 
-    # 3. "manana" (referencia relativa a hoy, NO franja horaria)
+    # 6. "manana" (referencia relativa a hoy, NO franja horaria)
     if re.search(r"\bmanana\b", lower) or re.search(r"\bmañana\b", lower):
         # Solo si NO esta precedido por "por la" o "de la" (franja horaria)
         if not re.search(r"(?:por|de)\s+la\s+ma[nñ]ana", lower):
@@ -220,7 +316,7 @@ def extract_day_from_message(msg: str, trip: dict) -> Optional[int]:
             if delta >= 1:
                 return delta
 
-    # 4. "pasado manana"
+    # 7. "pasado manana"
     if "pasado" in lower and ("manana" in lower or "mañana" in lower):
         day_after = date.today() + timedelta(days=2)
         delta = (day_after - start_date).days + 1
@@ -266,6 +362,10 @@ def extract_item_name(msg: str) -> Optional[str]:
     # Remover datos temporales y de costo del final/medio
     # Remover "el dia X", "el 15 de abril", "a las 10:00", "por la manana", etc.
     patterns_to_remove = [
+        rf"(?:en\s+)?(?:el\s+)?(?:{_ORDINAL_NAMES})\s+dia(?:\s+de\s+mi\s+viaje)?",
+        rf"(?:el\s+)?dia\s+(?:{_ORDINAL_NAMES})",
+        r"(?:el\s+)?(?:ultimo|último|penultimo|penúltimo)\s+dia(?:\s+de\s+mi\s+viaje)?",
+        r"\bde\s+mi\s+viaje\b",
         rf"(?:el\s+)?dia\s+\d+",
         rf"(?:el\s+)?\d{{1,2}}\s+de\s+(?:{_MESES_PATTERN})",
         r"(?:a\s+las?\s+)?\d{1,2}[:.]\d{2}",
@@ -322,11 +422,22 @@ def extract_location(msg: str) -> str:
     # Buscar "en [lugar]" — excluir "en abril", "en el dia 3", etc.
     m = re.search(
         rf"en\s+(?!(?:{_MESES_PATTERN})\b)(?!el\s+dia\b)(?!la\s+(?:manana|mañana|tarde|noche)\b)"
+        rf"(?!(?:el\s+)?(?:{_ORDINAL_NAMES})\s+dia)"
         r"([A-Za-záéíóúñÁÉÍÓÚÑ\s]+?)(?:\s+(?:el|a\s+las?|por|del|dia)\s+|$)",
         lower,
     )
     if m:
         loc = m.group(1).strip().strip(".,;:!?")
+        # Limpiar referencias ordinales/temporales residuales del final
+        loc = re.sub(
+            rf"\s*(?:en\s+)?(?:el\s+)?(?:{_ORDINAL_NAMES})\s+dia.*", "",
+            loc, flags=re.IGNORECASE,
+        ).strip()
+        loc = re.sub(
+            r"\s*(?:el\s+)?(?:ultimo|último|penultimo|penúltimo)\s+dia.*", "",
+            loc, flags=re.IGNORECASE,
+        ).strip()
+        loc = re.sub(r"\s*(?:el\s+)?dia\s+\d+.*", "", loc, flags=re.IGNORECASE).strip()
         if len(loc) >= 2:
             return loc[0].upper() + loc[1:]
 
@@ -358,11 +469,13 @@ def extract_item_data(msg: str, trip: dict, current_draft: Optional[dict] = None
         if day:
             draft["day"] = day
 
-    # Extraer hora si no existe
-    if not draft.get("start_time"):
-        time = extract_time(msg)
-        if time:
-            draft["start_time"] = time
+    # Extraer hora — siempre intentar override si el usuario la especifica
+    time_range = extract_time_range(msg)
+    if time_range[0]:
+        draft["start_time"] = time_range[0]
+        if time_range[1]:
+            draft["end_time"] = time_range[1]
+    # Si no hay tiempo en el mensaje y no hay tiempo previo → queda None
 
     # Si no se extrajo hora, usar default segun tipo y subtipo
     if not draft.get("start_time") and draft.get("item_type"):

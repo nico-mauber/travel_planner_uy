@@ -18,6 +18,7 @@ from services.item_extraction import (
     detect_time_conflict, build_item_confirmation_data,
     new_item_draft, calculate_end_time,
     detect_cancel_intent as detect_item_cancel_intent,
+    _ORDINAL_NAMES,
 )
 
 logger = logging.getLogger(__name__)
@@ -137,6 +138,9 @@ def _is_informative_question(msg: str) -> bool:
     _DATA_INDICATORS = [
         r"\bdia\s+\d+", r"\d{1,2}[:.]\d{2}",
         r"\bmanana\b", r"\btarde\b", r"\bnoche\b",
+        rf"\b(?:{_ORDINAL_NAMES})\s+dia",
+        rf"\bdia\s+(?:{_ORDINAL_NAMES})\b",
+        r"\b(?:ultimo|último|penultimo|penúltimo)\s+dia",
     ]
     for pattern in _DATA_INDICATORS:
         if re.search(pattern, lower):
@@ -411,9 +415,19 @@ def _handle_item_creation_flow(
             "_item_creation_draft": None,
         }
 
+    # Guardar horario previo para detectar cambios
+    old_start = draft.get("start_time")
+    old_end = draft.get("end_time")
+
     # Extraer datos del mensaje y combinar con draft
     updated = extract_item_data(original_message, trip, draft)
     updated["step"] = "collecting"
+
+    # Si el horario cambio, resetear _conflict_warned para re-evaluar conflictos
+    if updated.get("_conflict_warned") and (
+        updated.get("start_time") != old_start or updated.get("end_time") != old_end
+    ):
+        updated.pop("_conflict_warned", None)
 
     missing = get_missing_item_fields(updated)
 
