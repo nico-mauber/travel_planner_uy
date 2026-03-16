@@ -22,14 +22,35 @@ _PYTHON_EXECUTABLE = sys.executable
 
 
 def is_auth_enabled() -> bool:
-    """Verifica si las credenciales OAuth estan configuradas y Authlib esta instalado."""
+    """Verifica si las credenciales OAuth estan configuradas y Authlib esta instalado.
+
+    Requiere formato anidado en secrets:
+        [auth]
+        redirect_uri = "..."
+        [auth.google]
+        client_id = "..."
+    """
     if not _AUTHLIB_AVAILABLE:
         return False
     try:
         secrets = st.secrets
-        return bool(
+        # Formato correcto: [auth.google].client_id
+        has_nested = bool(
             secrets.get("auth", {}).get("google", {}).get("client_id")
         )
+        if has_nested:
+            return True
+
+        # Detectar formato plano incorrecto (del secrets.toml.example legacy)
+        has_flat = bool(secrets.get("GOOGLE_CLIENT_ID"))
+        if has_flat:
+            import logging
+            logging.getLogger(__name__).error(
+                "Secrets tiene formato plano (GOOGLE_CLIENT_ID) en vez del "
+                "formato anidado [auth.google] que Streamlit requiere. "
+                "Consulta secrets.toml.example para el formato correcto."
+            )
+        return False
     except Exception:
         return False
 

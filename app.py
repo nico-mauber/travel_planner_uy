@@ -49,7 +49,7 @@ if not is_supabase_available():
     )
     st.stop()
 
-# ─── Verificar entorno ───
+# ─── Verificar entorno y diagnostico de auth ───
 from services.auth_service import _AUTHLIB_AVAILABLE, _PYTHON_EXECUTABLE
 if not _AUTHLIB_AVAILABLE:
     _is_venv = "venv" in _PYTHON_EXECUTABLE or "envs" in _PYTHON_EXECUTABLE
@@ -65,6 +65,31 @@ if not _AUTHLIB_AVAILABLE:
         + "\n\nContinuando en modo demo (sin login).",
         icon="⚠️",
     )
+elif not is_auth_enabled():
+    # Authlib instalado pero secrets no configurados — posible deploy a Cloud sin secrets
+    _has_any_secret = False
+    try:
+        _has_any_secret = bool(st.secrets)
+    except Exception:
+        pass
+    if not _has_any_secret:
+        st.warning(
+            "**Login con Google deshabilitado** — No se encontraron secrets.\n\n"
+            "Si estas en **Streamlit Cloud**, configura los secrets en:\n"
+            "App Settings > Secrets\n\n"
+            "Formato requerido:\n"
+            "```toml\n"
+            "[auth]\n"
+            'redirect_uri = "https://tu-app.streamlit.app/oauth2callback"\n'
+            'cookie_secret = "un-secret-seguro"\n\n'
+            "[auth.google]\n"
+            'client_id = "tu-client-id"\n'
+            'client_secret = "tu-client-secret"\n'
+            'server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"\n'
+            "```\n\n"
+            "Continuando en modo demo (sin login).",
+            icon="⚠️",
+        )
 
 # ─── Guard de autenticacion ───
 require_auth()

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Proyecto
 
-Trip Planner — MVP de un agente de planificacion de viajes con interfaz Streamlit. Multi-usuario con Google OAuth (fallback a modo demo sin auth). Persistencia en Supabase (PostgreSQL). Agente conversacional dual: LLM (OpenAI gpt-4.1-nano via LangGraph) cuando `OPENAI_API_KEY` esta presente, o fallback basico. Integracion opcional con Booking.com (RapidAPI) para busqueda de hoteles. Servidor MCP standalone para exponer herramientas de busqueda de hoteles.
+Trip Planner — MVP de un agente de planificacion de viajes con interfaz Streamlit. Multi-usuario con Google OAuth (fallback a modo demo sin auth). Persistencia en Supabase (PostgreSQL). Agente conversacional dual: LLM (OpenAI gpt-4.1-nano via LangGraph) cuando `OPENAI_API_KEY` esta presente, o fallback basico. Extraccion inteligente de items via LLM structured output (ChatOpenAI.with_structured_output + Pydantic) con fallback a keywords. Integracion opcional con Booking.com (RapidAPI) para busqueda de hoteles. Servidor MCP standalone para exponer herramientas de busqueda de hoteles.
 
 ## Comandos
 
@@ -60,10 +60,10 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 ### Capas
 
 - **`app.py`** — Punto de entrada. Configura `st.set_page_config(layout="wide")`, inyecta CSS global, ejecuta guard de autenticacion, inicializa `session_state`, sincroniza `active_trip_id` desde `chat_selected_trip_id`, configura `st.navigation()` con 7 paginas, renderiza sidebar con viaje activo. Carga `.env` con `load_dotenv()` al inicio.
-- **`services/`** — Logica de negocio pura (sin Streamlit). 14 servicios (ver seccion Servicios).
+- **`services/`** — Logica de negocio pura (sin Streamlit). 15 servicios (ver seccion Servicios).
 - **`pages/`** — 7 paginas Streamlit. Dashboard, Itinerario y Presupuesto tienen selector de viaje propio. Cronograma muestra todos los viajes. Chat tiene selector obligatorio.
 - **`components/`** — 5 widgets reutilizables que reciben datos y retornan acciones del usuario como dicts (ej: `{"action": "accept", "item_id": "..."}`).
-- **`config/`** — `settings.py` (Enums, paletas de colores, iconos, labels en espanol, `DEMO_USER_ID`) y `llm_config.py` (modelo OpenAI `gpt-4.1-nano`, temperatura, embeddings, reasoning effort).
+- **`config/`** — `settings.py` (Enums, paletas de colores, iconos, labels en espanol, `DEMO_USER_ID`) y `llm_config.py` (modelo OpenAI `gpt-4.1-nano`, temperaturas para chat y extraccion, embeddings).
 - **`models/`** — Dataclasses con `to_dict()`/`from_dict()` (Trip, ItineraryItem, Budget, UserProfile, Feedback). No se usan en runtime — los services operan directo sobre dicts.
 - **`data/`** — `sample_data.py` (viajes demo) + `llm_data/` (ChromaDB + checkpoints, local).
 - **`mcp_servers/`** — Servidor MCP standalone (`booking_server.py`) que expone `buscar_destinos` y `buscar_hoteles` como tools via FastMCP (transporte stdio).
@@ -74,8 +74,9 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 |---|---|
 | `supabase_client.py` | Cliente Supabase singleton. Lee `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` de `.env` |
 | `trip_service.py` | CRUD de viajes, agrupacion de items por dia, aceptar/descartar sugerencias, recalculo de presupuesto, sincronizacion con Supabase. Servicio central |
-| `agent_service.py` | Dispatcher principal del chat. Deteccion lazy de LLM (`_check_llm()`). Rutea a LLM, acciones o Booking.com segun contexto. Acciones de datos siempre por pattern matching |
-| `item_extraction.py` | Extraccion inteligente de items del itinerario. Regex para nombre, dia, hora, tipo, costo, ubicacion. Flujo multi-turn. Deteccion de conflictos horarios. Logica pura sin Streamlit |
+| `agent_service.py` | Dispatcher principal del chat. 2 paths: CON LLM (el LLM detecta ALL intents semanticamente, sin keywords) y SIN LLM (keywords centralizadas en item_extraction). Deteccion lazy (`_check_llm()`). Sanitizacion de input. Funciones extraidas: `_hotel_search_response()`, `_llm_chat_response()` |
+| `item_extraction.py` | Utilidades de validacion, confirmacion y fallback basico. ALL keywords de fallback centralizadas aqui (`_CALENDAR_KEYWORDS`, `_HOTEL_KEYWORDS`, `_REMOVE_KEYWORDS`, `_ADD_KEYWORDS`). Funciones `detect_*_intent()` solo para path sin LLM |
+| `llm_item_extraction.py` | Extraccion inteligente de items via LLM structured output (`ChatOpenAI.with_structured_output` + schema Pydantic `ItemExtractionResult`). Detecta intent + extrae datos en una sola llamada. Post-validacion defensiva |
 | `trip_creation_flow.py` | Flujo multi-turn de creacion de viajes desde el chat. Deteccion de intencion (strong/weak keywords), extraccion de destino y fechas con regex, validacion. Logica pura sin Streamlit |
 | `auth_service.py` | OAuth condicional (Authlib + secrets.toml). Guard `require_auth()`. CRUD de usuarios en Supabase |
 | `chat_service.py` | Multi-conversacion por usuario. CRUD de chats, auto-titulo, persistencia en Supabase |
@@ -145,27 +146,44 @@ Tablas en Supabase (PostgreSQL):
 
 ## Chat — Dual mode (LLM / Fallback)
 
-- `agent_service.py` detecta `OPENAI_API_KEY` de forma **lazy** (`_check_llm()`). La deteccion se ejecuta la primera vez que se procesa un mensaje, no al importar el modulo. Esto evita problemas con el hot-reload de Streamlit que puede re-importar modulos antes de que `load_dotenv()` haya corrido.
+- `agent_service.py` detecta `OPENAI_API_KEY` de forma **lazy** (`_check_llm()`). La deteccion se ejecuta la primera vez que se procesa un mensaje, no al importar el modulo. Esto evita problemas con el hot-reload de Streamlit que puede re-importar modulos antes de que `load_dotenv()` haya corrido. Carga tanto el chatbot LLM (`_llm_process_fn`) como el extractor de items (`_llm_extract_fn` desde `llm_item_extraction.py`).
 - Las **acciones que modifican datos** (crear viaje, agregar/eliminar items, eventos de cronograma) **siempre** pasan por pattern matching para generar confirmaciones con botones UI, nunca por el LLM.
 - Los mensajes son dicts con `{role, type, content}`. `type` puede ser `"text"`, `"card"`, `"confirmation"` o `"hotel_results"`. Las confirmaciones procesadas se marcan con `msg["processed"] = True`.
 
-**Prioridad de ruteo en `agent_service.py`** (orden estricto):
-1. **Flujo multi-turn de creacion de viaje** (`trip_creation_flow.py`) — si hay draft activo
-2. **Flujo multi-turn de creacion de item** (`item_extraction.py`) — si hay draft activo. Preguntas informativas (`_is_informative_question()`) escapan al LLM sin consumir turno
-3. **Evento de cronograma** — keywords "cronograma", "calendario" (evaluado ANTES de add_item)
-4. **Agregar item** — keywords "agregar", "agrega", etc. Excluye si hay keywords de calendario
-5. **Eliminar item** — keywords "eliminar", "quitar", "borrar"
-6. **Busqueda de hoteles** — si Booking.com activo y keywords de hotel detectados
-7. **LLM** — consultas informativas van a OpenAI gpt-4.1-nano
-8. **Fallback** — mensaje de "IA no disponible" si no hay API key
+**Prioridad de ruteo en `agent_service.py`** — 2 paths mutuamente excluyentes:
 
-**Extraccion inteligente de items** (`item_extraction.py`):
-- Detecta nombre, dia, hora, tipo, costo y ubicacion por regex
+*CON LLM* (orden estricto):
+1. **Flujo multi-turn de creacion de viaje** (`trip_creation_flow.py`) — si hay draft activo
+2. **Flujo multi-turn de creacion de item** (`item_extraction.py`) — si hay draft activo. Preguntas informativas escapan al LLM sin consumir turno
+3. **Deteccion unificada via LLM** (`_handle_llm_extraction`) — UNA sola llamada detecta intent (`add_item`, `calendar_event`, `remove_item`, `hotel_search`, `informative`, `unknown`) y extrae datos. **Sin keywords, sin guards previos** — el LLM entiende la intencion semanticamente sin importar idioma o palabras exactas
+4. **LLM chat** (`_llm_chat_response`) — fall-through para informative/unknown
+
+*SIN LLM* (fallback por keywords):
+1. **Flujo multi-turn de creacion de viaje** — si hay draft activo
+2. **Flujo multi-turn de creacion de item** — si hay draft activo
+3. **Keywords**: calendario → agregar item → eliminar → hotel (funciones `detect_*_intent()` centralizadas en `item_extraction.py`)
+4. **"IA no disponible"** — mensaje de fallback final
+
+**Extraccion inteligente de items — Dual mode (LLM / Fallback):**
+
+*Con LLM* (`llm_item_extraction.py`):
+- `ChatOpenAI.with_structured_output(ItemExtractionResult)` — una sola llamada detecta intent y extrae datos estructurados
+- Schema Pydantic `ItemExtractionResult`: intent (incluye `hotel_search`), name, day, start_time, end_time, item_type, location, cost, is_complete, missing_fields, follow_up_question
+- System prompt semantico: describe intenciones por significado, NO por keywords. El LLM entiende cualquier idioma/fraseo
+- Post-validacion defensiva (`_post_validate`): valida intent, item_type, rango de dias, formato de horas, merge con draft existente
+- Singleton `_extraction_llm` (ChatOpenAI con `EXTRACTION_TEMPERATURE=0` para determinismo)
+- Interpreta ordinales ("tercer dia" -> 3), referencias relativas ("ultimo dia", "manana"), y periodos ("por la tarde" -> 15:00)
+
+*Sin LLM — fallback* (`item_extraction.py`):
+- Extraccion basica por regex y keywords: dia (`dia N`), hora (`HH:MM`), tipo por keywords
+- **ALL keywords de fallback centralizadas** en este modulo: `_ADD_KEYWORDS`, `_CALENDAR_KEYWORDS`, `_HOTEL_KEYWORDS`, `_REMOVE_KEYWORDS`, `_ITEM_TYPE_KEYWORDS`
+- Funciones de deteccion de intent: `detect_add_item_intent()`, `detect_calendar_intent()`, `detect_hotel_intent()`, `detect_remove_item_intent()`
+
+*Comun a ambos modos:*
 - Flujo multi-turn (max 3 turnos) si faltan datos minimos (nombre + dia)
-- Infiere tipo de item por keywords (comida, alojamiento, vuelo, traslado, extra)
-- Calcula `end_time` por duraciones default segun tipo
-- Detecta conflictos horarios con items existentes
-- `_CALENDAR_EXCLUSION_KEYWORDS` evita que "agrega mi viaje al cronograma" sea capturado como add_item
+- Calcula `end_time` por duraciones default segun tipo (`_DEFAULT_DURATIONS`)
+- Detecta conflictos horarios con items existentes (`detect_time_conflict`)
+- Genera confirmacion con tarjeta rica (`build_item_confirmation_data`)
 
 **Deteccion de intencion de creacion de viaje** (`trip_creation_flow.py`):
 - Keywords **fuertes** ("quiero ir", "crear viaje", "me gustaria ir") -> siempre disparan creacion
@@ -187,6 +205,11 @@ Tablas en Supabase (PostgreSQL):
 - `mcp_servers/booking_server.py` — Servidor FastMCP standalone que expone `buscar_destinos` y `buscar_hoteles` como tools.
 - Transporte: stdio. Ejecutable con `python mcp_servers/booking_server.py`.
 
+**Sanitizacion de input:**
+- `_sanitize_user_input()` en `agent_service.py` limpia patrones de prompt injection antes de procesar mensajes
+- Detecta y elimina: instrucciones de ignorar/olvidar, cambios de rol/persona, intentos de revelar system prompt, tokens de control (`[INST]`, `<|im_start|>`)
+- No bloquea el mensaje (soft sanitization): si queda vacio tras limpiar, devuelve el original
+
 ## Reglas de negocio criticas
 
 1. **Items con `status="sugerido"` NO se contabilizan en presupuesto**. Filtrar por `ItemStatus.SUGGESTED` antes de cualquier calculo financiero.
@@ -207,7 +230,7 @@ Tablas en Supabase (PostgreSQL):
 - Cada pagina envuelve su contenido en `try/except` con boton "Reintentar"
 - `OPENAI_API_KEY` en `.env` habilita el LLM; sin ella, solo funcionan acciones por pattern matching
 - Servicios que dependen de APIs externas (OpenAI, Booking.com) degradan graciosamente
-- Singletons para `TripChatbot` y `TripMemoryManager` — una instancia por proceso
+- Singletons para `TripChatbot`, `TripMemoryManager` y `_extraction_llm` (ChatOpenAI para extraccion) — una instancia por proceso
 
 ## Dependencias principales
 
@@ -223,7 +246,7 @@ Tablas en Supabase (PostgreSQL):
 | `httpx>=0.25.0` | Cliente HTTP para Booking.com API |
 | `mcp[cli]>=1.2.0` | Servidor MCP (FastMCP) |
 | `supabase>=2.0.0` | Cliente Supabase (persistencia PostgreSQL) |
-| `pydantic>=2.0.0` | Modelos estructurados (memoria LLM) |
+| `pydantic>=2.0.0` | Modelos estructurados (memoria LLM + schema `ItemExtractionResult` para structured output) |
 
 ## Documentacion de requerimientos
 

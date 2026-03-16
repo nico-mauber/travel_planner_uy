@@ -18,6 +18,7 @@ from services.item_extraction import (
     detect_time_conflict, build_item_confirmation_data,
     new_item_draft, calculate_end_time,
     detect_cancel_intent as detect_item_cancel_intent,
+    detect_calendar_intent, detect_hotel_intent, detect_remove_item_intent,
     _ORDINAL_NAMES,
 )
 
@@ -29,11 +30,12 @@ logger = logging.getLogger(__name__)
 # lo que dejaría _USE_LLM = False permanentemente.
 _USE_LLM = None  # None = no inicializado aún
 _llm_process_fn = None  # referencia cacheada a process_message_llm
+_llm_extract_fn = None  # referencia cacheada a extract_item_with_llm
 
 
 def _check_llm():
     """Inicializa la detección de LLM de forma lazy. Solo corre una vez."""
-    global _USE_LLM, _llm_process_fn
+    global _USE_LLM, _llm_process_fn, _llm_extract_fn
     if _USE_LLM is not None:
         return
     _USE_LLM = bool(os.environ.get("OPENAI_API_KEY"))
@@ -45,8 +47,15 @@ def _check_llm():
                 _llm_process_fn = process_message_llm
         except ImportError:
             _USE_LLM = False
-    logger.info("LLM disponible: %s (OPENAI_API_KEY: %s)",
-                _USE_LLM, bool(os.environ.get("OPENAI_API_KEY")))
+        # Cargar extractor LLM de items (independiente del chatbot)
+        if _USE_LLM:
+            try:
+                from services.llm_item_extraction import extract_item_with_llm
+                _llm_extract_fn = extract_item_with_llm
+            except ImportError:
+                logger.warning("No se pudo importar llm_item_extraction")
+    logger.info("LLM disponible: %s, Extractor LLM: %s",
+                _USE_LLM, _llm_extract_fn is not None)
 
 # ─── Detectar si Booking.com está disponible ───
 _USE_BOOKING = False
@@ -58,20 +67,6 @@ try:
 except ImportError:
     pass
 
-_HOTEL_KEYWORDS = [
-    "hotel", "hoteles", "alojamiento", "hospedaje", "hostel",
-    "donde dormir", "donde alojar", "donde quedar",
-    "habitacion", "habitación", "reservar hotel",
-    "booking", "alojarnos", "hospedarnos",
-]
-
-# ─── Keywords de cronograma (REQ-CF-002 RN-001) ───
-_CALENDAR_KEYWORDS = [
-    "cronograma", "calendario", "agregar al calendario",
-    "crear evento", "bloque de viaje", "fechas del viaje al cronograma",
-    "agregar al cronograma", "evento de calendario",
-    "agregar mi viaje al cronograma", "crear evento del viaje",
-]
 
 
 # ─── Patrones de prompt injection a sanitizar ───
@@ -115,14 +110,22 @@ def is_booking_active() -> bool:
     return _USE_BOOKING
 
 
-def _detect_hotel_intent(msg: str) -> bool:
-    """Detecta si el mensaje tiene intencion de buscar hoteles."""
-    return any(kw in msg for kw in _HOTEL_KEYWORDS)
+# ─── Constantes compiladas para deteccion de preguntas informativas ───
+_DATA_INDICATORS = [
+    re.compile(r"\bdia\s+\d+"),
+    re.compile(r"\d{1,2}[:.]\d{2}"),
+    re.compile(r"\bmanana\b"),
+    re.compile(r"\btarde\b"),
+    re.compile(r"\bnoche\b"),
+    re.compile(rf"\b(?:{_ORDINAL_NAMES})\s+dia"),
+    re.compile(rf"\bdia\s+(?:{_ORDINAL_NAMES})\b"),
+    re.compile(r"\b(?:ultimo|último|penultimo|penúltimo)\s+dia"),
+]
 
-
-def _detect_calendar_intent(msg: str) -> bool:
-    """Detecta si el mensaje tiene intencion de crear evento de cronograma (REQ-CF-002)."""
-    return any(kw in msg for kw in _CALENDAR_KEYWORDS)
+_QUESTION_STARTERS = [
+    "que ", "cual ", "cuando ", "donde ", "cuanto ", "como ",
+    "por que ", "cuales ", "cuantos ",
+]
 
 
 def _is_informative_question(msg: str) -> bool:
@@ -135,20 +138,9 @@ def _is_informative_question(msg: str) -> bool:
     if "?" not in lower and "\u00bf" not in lower:
         return False
     # Si contiene datos validos para el draft, NO es pregunta informativa
-    _DATA_INDICATORS = [
-        r"\bdia\s+\d+", r"\d{1,2}[:.]\d{2}",
-        r"\bmanana\b", r"\btarde\b", r"\bnoche\b",
-        rf"\b(?:{_ORDINAL_NAMES})\s+dia",
-        rf"\bdia\s+(?:{_ORDINAL_NAMES})\b",
-        r"\b(?:ultimo|último|penultimo|penúltimo)\s+dia",
-    ]
     for pattern in _DATA_INDICATORS:
-        if re.search(pattern, lower):
+        if pattern.search(lower):
             return False
-    _QUESTION_STARTERS = [
-        "que ", "cual ", "cuando ", "donde ", "cuanto ", "como ",
-        "por que ", "cuales ", "cuantos ",
-    ]
     return any(lower.startswith(qs) or f" {qs}" in lower for qs in _QUESTION_STARTERS)
 
 
@@ -182,70 +174,31 @@ def process_message(message: str, trip: Optional[dict] = None,
     if result is not None:
         return result
 
-    # ─── Evento de cronograma (REQ-CF-002) — evaluar ANTES de add_item ───
-    if trip and _detect_calendar_intent(msg):
-        return _calendar_event_response(trip)
+    # ─── PATH CON LLM: una sola llamada detecta ALL intents sin keywords ───
+    if trip and _llm_extract_fn:
+        result = _handle_llm_extraction(message, trip, user_id, chat_id)
+        if result is not None:
+            return result
+        # Fall-through: LLM chat para informative/unknown
+        if _USE_LLM and _llm_process_fn:
+            return _llm_chat_response(message, trip, user_id, chat_id)
 
-    # Agregar item — extraccion inteligente (REQ-CF-003)
-    if trip and detect_add_item_intent(msg):
-        return _add_item_response(msg, trip)
-
-    # Eliminar item — siempre confirmación
-    if trip and any(w in msg for w in ["eliminar", "quitar", "elimina", "quita", "borrar"]):
-        return _remove_item_response(msg, trip)
-
-    # ─── Busqueda de hoteles via Booking.com ───
-    if trip and _USE_BOOKING and _detect_hotel_intent(msg):
-        try:
-            hotels = search_hotels_for_trip(trip, limit=5)
-            if hotels:
-                cards = format_hotels_as_cards(hotels)
-                # Obtener respuesta contextual del LLM si esta disponible
-                llm_text = ""
-                if _USE_LLM and _llm_process_fn:
-                    try:
-                        import streamlit as st
-                        user_profile = st.session_state.get("user_profile")
-                        llm_resp = _llm_process_fn(
-                            message, trip, user_profile,
-                            user_id=user_id, chat_id=chat_id,
-                        )
-                        llm_text = llm_resp.get("content", "")
-                    except Exception:
-                        pass
-
-                dest = trip.get("destination", "tu destino")
-                return {
-                    "role": "assistant",
-                    "type": "hotel_results",
-                    "content": {
-                        "text": llm_text or (
-                            f"Encontre estos hoteles en **{dest}** "
-                            f"para tus fechas ({trip.get('start_date', '')} — "
-                            f"{trip.get('end_date', '')}):"
-                        ),
-                        "hotels": cards,
-                    },
-                }
-        except Exception as e:
-            logger.warning("Error en busqueda Booking.com: %s", e)
-
-    # ─── LLM (OpenAI) ───
-    if _USE_LLM and _llm_process_fn:
-        try:
-            import streamlit as st
-            user_profile = st.session_state.get("user_profile")
-            return _llm_process_fn(
-                message, trip, user_profile,
-                user_id=user_id, chat_id=chat_id,
-            )
-        except Exception as e:
-            logger.warning("Error en LLM: %s", e)
-            return {
-                "role": "assistant",
-                "type": "text",
-                "content": "Hubo un error al procesar tu mensaje. Por favor, intenta de nuevo.",
-            }
+    # ─── PATH SIN LLM: deteccion por keywords ───
+    if trip and not _llm_extract_fn:
+        # Evento de cronograma (REQ-CF-002) — evaluar ANTES de add_item
+        if detect_calendar_intent(msg):
+            return _calendar_event_response(trip)
+        # Agregar item — extraccion basica
+        if detect_add_item_intent(msg):
+            return _add_item_response(msg, trip)
+        # Eliminar item
+        if detect_remove_item_intent(msg):
+            return _remove_item_response(msg, trip)
+        # Busqueda de hoteles via Booking.com
+        if _USE_BOOKING and detect_hotel_intent(msg):
+            result = _hotel_search_response(message, trip, user_id, chat_id)
+            if result is not None:
+                return result
 
     # ─── Sin LLM configurado ───
     return {
@@ -419,8 +372,16 @@ def _handle_item_creation_flow(
     old_start = draft.get("start_time")
     old_end = draft.get("end_time")
 
-    # Extraer datos del mensaje y combinar con draft
-    updated = extract_item_data(original_message, trip, draft)
+    # Extraer datos del mensaje (LLM o regex fallback)
+    if _llm_extract_fn:
+        llm_result = _llm_extract_fn(original_message, trip, draft)
+        if llm_result:
+            updated = _merge_extraction_to_draft(llm_result, draft)
+        else:
+            # Error en LLM → fallback a regex
+            updated = extract_item_data(original_message, trip, draft)
+    else:
+        updated = extract_item_data(original_message, trip, draft)
     updated["step"] = "collecting"
 
     # Si el horario cambio, resetear _conflict_warned para re-evaluar conflictos
@@ -493,8 +454,167 @@ def _finalize_item_draft(draft: dict, trip: dict) -> dict:
     return confirmation
 
 
+def _handle_llm_extraction(
+    message: str, trip: dict,
+    user_id: Optional[str] = None, chat_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Deteccion de intent y extraccion unificada via LLM structured output.
+
+    Reemplaza la cadena de if (calendar → add_item → remove_item → hotel) cuando
+    el LLM esta disponible. Una sola llamada detecta intent y extrae datos.
+
+    Retorna dict de respuesta si el LLM maneja el intent, o None para fall-through.
+    """
+    result = _llm_extract_fn(message, trip)
+    if result is None:
+        return None  # Error en LLM, fall through
+
+    if result.intent == "add_item":
+        return _handle_extraction_result(result, trip)
+
+    if result.intent == "calendar_event":
+        return _calendar_event_response(trip)
+
+    if result.intent == "remove_item":
+        return _remove_item_response(message.lower(), trip)
+
+    if result.intent == "hotel_search":
+        if _USE_BOOKING:
+            return _hotel_search_response(message, trip, user_id, chat_id)
+        # Sin Booking → fall through al LLM chat para respuesta informativa
+        return None
+
+    # informative, unknown → fall through al LLM chat
+    return None
+
+
+def _handle_extraction_result(result, trip: dict) -> dict:
+    """Convierte ItemExtractionResult del LLM en respuesta de chat.
+
+    Si los datos estan completos, genera confirmacion.
+    Si faltan datos, inicia flujo multi-turn.
+    """
+    draft = new_item_draft()
+    draft["name"] = result.name
+    draft["day"] = result.day
+    draft["start_time"] = result.start_time
+    draft["end_time"] = result.end_time
+    draft["item_type"] = result.item_type or "actividad"
+    draft["location"] = result.location or ""
+    draft["cost_estimated"] = result.cost or 0.0
+    draft["step"] = "collecting"
+
+    if result.is_complete:
+        return _finalize_item_draft(draft, trip)
+
+    # Incompleto → iniciar multi-turn con pregunta del LLM o fallback
+    prompt = result.follow_up_question or build_item_prompt_for_missing(
+        draft, result.missing_fields,
+    )
+    return {
+        "role": "assistant",
+        "type": "text",
+        "content": prompt,
+        "_item_creation_draft": draft,
+    }
+
+
+def _merge_extraction_to_draft(result, draft: dict) -> dict:
+    """Merge ItemExtractionResult del LLM con draft existente (multi-turn).
+
+    Solo sobreescribe campos que el LLM extrajo del mensaje actual.
+    """
+    updated = dict(draft)
+    if result.name:
+        updated["name"] = result.name
+    if result.day:
+        updated["day"] = result.day
+    if result.start_time:
+        updated["start_time"] = result.start_time
+    if result.end_time:
+        updated["end_time"] = result.end_time
+    if result.item_type and result.item_type != "actividad":
+        updated["item_type"] = result.item_type
+    elif not updated.get("item_type"):
+        updated["item_type"] = result.item_type or "actividad"
+    if result.location:
+        updated["location"] = result.location
+    if result.cost is not None and result.cost > 0:
+        updated["cost_estimated"] = result.cost
+    return updated
+
+
+def _hotel_search_response(
+    message: str, trip: dict,
+    user_id: Optional[str] = None, chat_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Busca hoteles via Booking.com y retorna resultados formateados.
+
+    Retorna dict de respuesta con hotel_results, o None si no hay resultados.
+    """
+    try:
+        hotels = search_hotels_for_trip(trip, limit=5)
+        if not hotels:
+            return None
+
+        cards = format_hotels_as_cards(hotels)
+        # Obtener respuesta contextual del LLM si esta disponible
+        llm_text = ""
+        if _USE_LLM and _llm_process_fn:
+            try:
+                import streamlit as st
+                user_profile = st.session_state.get("user_profile")
+                llm_resp = _llm_process_fn(
+                    message, trip, user_profile,
+                    user_id=user_id, chat_id=chat_id,
+                )
+                llm_text = llm_resp.get("content", "")
+            except Exception:
+                pass
+
+        dest = trip.get("destination", "tu destino")
+        return {
+            "role": "assistant",
+            "type": "hotel_results",
+            "content": {
+                "text": llm_text or (
+                    f"Encontre estos hoteles en **{dest}** "
+                    f"para tus fechas ({trip.get('start_date', '')} — "
+                    f"{trip.get('end_date', '')}):"
+                ),
+                "hotels": cards,
+            },
+        }
+    except Exception as e:
+        logger.warning("Error en busqueda Booking.com: %s", e)
+        return None
+
+
+def _llm_chat_response(
+    message: str, trip: Optional[dict],
+    user_id: Optional[str] = None, chat_id: Optional[str] = None,
+) -> dict:
+    """Envia mensaje al LLM chat (OpenAI gpt-4.1-nano) para respuesta conversacional."""
+    try:
+        import streamlit as st
+        user_profile = st.session_state.get("user_profile")
+        return _llm_process_fn(
+            message, trip, user_profile,
+            user_id=user_id, chat_id=chat_id,
+        )
+    except Exception as e:
+        logger.warning("Error en LLM: %s", e)
+        return {
+            "role": "assistant",
+            "type": "text",
+            "content": "Hubo un error al procesar tu mensaje. Por favor, intenta de nuevo.",
+        }
+
+
 def _add_item_response(msg: str, trip: dict) -> dict:
-    """Extrae datos del mensaje y genera confirmacion o inicia flujo multi-turn (REQ-CF-003)."""
+    """Extrae datos del mensaje y genera confirmacion o inicia flujo multi-turn.
+
+    Solo se usa como fallback cuando no hay LLM disponible."""
     draft = new_item_draft()
     draft = extract_item_data(msg, trip, draft)
     draft["step"] = "collecting"

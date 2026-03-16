@@ -86,6 +86,16 @@ REQ-CF-003 (Items con Extraccion Inteligente)
 
 ---
 
+## Estado de Implementacion
+
+| Codigo | Estado | Notas |
+|--------|--------|-------|
+| REQ-CF-001 | Implementado | Selector obligatorio de viaje en `pages/2_Chat.py`. `trip_id` obligatorio en chats. Filtra viajes activos + opcion "Crear nuevo viaje" |
+| REQ-CF-002 | Implementado | Campo `end_day` en modelo de item. Migracion SQL en `scripts/migration_cf002_end_day.sql`. Renderizado `allDay` en FullCalendar (color `#607D8B`). Deteccion de intent por LLM o keywords |
+| REQ-CF-003 | Implementado | Extraccion via LLM structured output (`llm_item_extraction.py`) con schema Pydantic `ItemExtractionResult`. Fallback a keywords basico (`item_extraction.py`). Flujo multi-turn (max 3 turnos). Deteccion de conflictos horarios. Confirmacion con tarjeta rica |
+
+---
+
 ## Informacion Pendiente de Clarificacion
 
 1. **REQ-CF-001**: Formato de visualizacion de viajes en el selector (solo destino, o destino + fechas + estado).
