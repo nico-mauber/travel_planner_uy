@@ -177,11 +177,6 @@ def migrate_chats():
         messages = chat.get("messages", [])
         for idx, msg in enumerate(messages):
             content = msg.get("content", "")
-            # JSONB: si content es string, envolver en JSON
-            if isinstance(content, str):
-                content_jsonb = json.dumps(content)
-            else:
-                content_jsonb = json.dumps(content)
 
             msg_row = {
                 "chat_id": chat["chat_id"],

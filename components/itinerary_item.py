@@ -1,5 +1,7 @@
 """Componente de item del itinerario expandible."""
 
+import html
+
 import streamlit as st
 from config.settings import (
     ITEM_TYPE_ICONS, STATUS_ICONS, ITEM_TYPE_LABELS,
@@ -65,10 +67,12 @@ def render_itinerary_item(item: dict, index: int) -> dict:
 def render_transfer(transfer_info: dict) -> None:
     """Renderiza un bloque visual de traslado entre items."""
     with st.container():
+        safe_from = html.escape(transfer_info['from'])
+        safe_to = html.escape(transfer_info['to'])
         st.markdown(
             f"<div style='background-color: #1E1E2E; padding: 8px 16px; "
             f"border-radius: 8px; margin: 4px 0; border-left: 3px solid #78909C;'>"
-            f"🚕 <b>Traslado:</b> {transfer_info['from']} → {transfer_info['to']} "
+            f"🚕 <b>Traslado:</b> {safe_from} → {safe_to} "
             f"&nbsp;|&nbsp; {transfer_info['transport']} "
             f"&nbsp;|&nbsp; ⏱️ {transfer_info['duration']} "
             f"&nbsp;|&nbsp; ~USD {transfer_info['cost_estimated']:,.0f}"

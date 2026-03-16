@@ -1,10 +1,19 @@
 """Trip Planner MVP — Punto de entrada Streamlit."""
 
+import html
+import logging
 import os
 import sys
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
+
+# Logging para ver actividad del LLM en consola
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 import streamlit as st
 
@@ -174,10 +183,12 @@ with st.sidebar:
             TripStatus.COMPLETED.value: "status-completed",
         }.get(trip["status"], "")
 
+        safe_name = html.escape(trip['name'])
+        safe_dest = html.escape(trip['destination'])
         st.markdown(
             f"""<div class="active-trip-box">
-            <strong>{trip['name']}</strong><br>
-            📍 {trip['destination']}<br>
+            <strong>{safe_name}</strong><br>
+            📍 {safe_dest}<br>
             📅 {trip['start_date']} → {trip['end_date']}<br>
             <span class="status-badge {status_class}">{status_label}</span>
             </div>""",

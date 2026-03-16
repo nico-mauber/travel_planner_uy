@@ -1,17 +1,20 @@
 """Gestor de memoria vectorial para el Trip Planner.
 Adaptado del multiuser_chat_system para usuario único y dominio de viajes."""
 
+import logging
 import os
 import uuid
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from typing_extensions import TypedDict, Annotated
 
+logger = logging.getLogger(__name__)
+
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
-from config.llm_config import LLM_DATA_DIR, MAX_VECTOR_RESULTS, DEFAULT_MODEL, DEFAULT_EMBEDDING_MODEL
+from config.llm_config import LLM_DATA_DIR, MAX_VECTOR_RESULTS, DEFAULT_MODEL
 
 
 class MemoryState(TypedDict):
@@ -46,32 +49,26 @@ class TripMemoryManager:
         """Inicializa ChromaDB."""
         try:
             import chromadb
-            from langchain_google_genai import GoogleGenerativeAIEmbeddings
-            from langchain_chroma import Chroma
 
-            self.vectorstore = Chroma(
-                collection_name="trip_planner_memories",
-                embedding_function=GoogleGenerativeAIEmbeddings(model=DEFAULT_EMBEDDING_MODEL),
-                persist_directory=self.chromadb_path,
-            )
+            logger.info("Inicializando ChromaDB (path=%s)", self.chromadb_path)
             self.client = chromadb.PersistentClient(path=self.chromadb_path)
             try:
                 self.collection = self.client.get_collection("trip_planner_memories")
             except Exception:
                 self.collection = self.client.create_collection("trip_planner_memories")
+            logger.info("ChromaDB inicializado OK (collection count=%d)", self.collection.count())
         except Exception as e:
-            print(f"Error inicializando ChromaDB: {e}")
-            self.vectorstore = None
+            logger.error("Error inicializando ChromaDB: %s", e, exc_info=True)
             self.collection = None
 
     def _init_extraction_system(self):
         """Inicializa el sistema de extracción de memorias orientado a viajes."""
         try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
+            from langchain_openai import ChatOpenAI
             from langchain_core.prompts import PromptTemplate
             from langchain_core.output_parsers import PydanticOutputParser
 
-            self.extraction_llm = ChatGoogleGenerativeAI(model=DEFAULT_MODEL, temperature=0)
+            self.extraction_llm = ChatOpenAI(model=DEFAULT_MODEL, temperature=0)
             self.memory_parser = PydanticOutputParser(pydantic_object=ExtractedMemory)
 
             self.extraction_template = PromptTemplate(
@@ -94,8 +91,9 @@ Si no es relevante, responde con categoría "none".
                 partial_variables={"format_instructions": self.memory_parser.get_format_instructions()},
             )
             self.extraction_chain = self.extraction_template | self.extraction_llm | self.memory_parser
+            logger.info("Sistema de extraccion de memorias inicializado OK")
         except Exception as e:
-            print(f"Error inicializando sistema de extracción: {e}")
+            logger.error("Error inicializando sistema de extraccion: %s", e, exc_info=True)
             self.extraction_chain = None
 
     # --- MEMORIA VECTORIAL ---
@@ -121,7 +119,7 @@ Si no es relevante, responde con categoría "none".
             )
             return memory_id
         except Exception as e:
-            print(f"Error guardando memoria vectorial: {e}")
+            logger.error("Error guardando memoria vectorial: %s", e)
             return ""
 
     def search_vector_memory(self, query: str, k: int = MAX_VECTOR_RESULTS,
@@ -146,7 +144,7 @@ Si no es relevante, responde con categoría "none".
             results = self.collection.query(**query_kwargs)
             return results["documents"][0] if results["documents"] else []
         except Exception as e:
-            print(f"Error buscando memoria vectorial: {e}")
+            logger.error("Error buscando memoria vectorial: %s", e)
             return []
 
     def get_all_vector_memories(self) -> List[Dict]:
@@ -165,7 +163,7 @@ Si no es relevante, responde con categoría "none".
                     })
             return memories
         except Exception as e:
-            print(f"Error obteniendo memorias vectoriales: {e}")
+            logger.error("Error obteniendo memorias vectoriales: %s", e)
             return []
 
     def extract_and_store_memories(self, user_message: str,
@@ -188,7 +186,7 @@ Si no es relevante, responde con categoría "none".
                 return bool(memory_id)
             return False
         except Exception as e:
-            print(f"Error en extracción automática: {e}")
+            logger.error("Error en extracción automática: %s", e)
             return self._extract_memories_manual(user_message, user_id=user_id)
 
     def _extract_memories_manual(self, user_message: str,

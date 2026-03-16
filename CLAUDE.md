@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Proyecto
 
-Trip Planner — MVP de un agente de planificación de viajes con interfaz Streamlit. Multi-usuario con Google OAuth (fallback a modo demo sin auth). Persistencia en Supabase (PostgreSQL). Agente conversacional dual: LLM (Gemini via LangGraph) cuando `GOOGLE_API_KEY` está presente, o mock por pattern matching. Integración opcional con Booking.com (RapidAPI) para búsqueda de hoteles reales. Servidor MCP standalone para exponer herramientas de búsqueda de hoteles.
+Trip Planner — MVP de un agente de planificación de viajes con interfaz Streamlit. Multi-usuario con Google OAuth (fallback a modo demo sin auth). Persistencia en Supabase (PostgreSQL). Agente conversacional dual: LLM (OpenAI gpt-4.1-nano via LangGraph) cuando `OPENAI_API_KEY` está presente, o mock por pattern matching. Integración opcional con Booking.com (RapidAPI) para búsqueda de hoteles reales. Servidor MCP standalone para exponer herramientas de búsqueda de hoteles.
 
 ## Comandos
 
@@ -21,13 +21,14 @@ No hay tests ni linter configurados actualmente.
 
 ## Variables de entorno
 
-En `.env` (cargado con `load_dotenv()` al inicio de `app.py`):
+En `.env` (cargado con `load_dotenv(override=True)` al inicio de `app.py` — `override=True` porque la máquina tiene variables de entorno de sistema que pueden colisionar):
 
 | Variable | Requerida | Efecto |
 |---|---|---|
 | `SUPABASE_URL` | **Sí** | URL del proyecto Supabase |
 | `SUPABASE_SERVICE_KEY` | **Sí** | Service role key de Supabase (bypasea RLS) |
-| `GOOGLE_API_KEY` | No | Habilita Gemini LLM. Sin ella, el chat usa mock por pattern matching |
+| `OPENAI_API_KEY` | No | Habilita OpenAI gpt-4.1-nano LLM. Sin ella, el chat usa mock por pattern matching |
+| `OPENAI_PROJECT` | No | Project ID de OpenAI (usado automáticamente por el SDK) |
 | `RAPIDAPI_KEY` | No | Habilita búsqueda de hoteles reales via Booking.com (DataCrawler) |
 | `RAPIDAPI_BOOKING_HOST` | No | Host de la API (default: `booking-com15.p.rapidapi.com`) |
 
@@ -43,7 +44,7 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 - **`services/`** — Lógica de negocio pura (sin Streamlit). 12 servicios (ver sección Servicios).
 - **`pages/`** — 7 páginas Streamlit. Cada una lee `st.session_state.trips`, obtiene el viaje activo vía `get_active_trip()`, y renderiza su sección. Páginas que requieren viaje activo redirigen a Mis Viajes si no hay uno.
 - **`components/`** — 5 widgets reutilizables que reciben datos y retornan acciones del usuario como dicts (ej: `{"action": "accept", "item_id": "..."}`).
-- **`config/`** — `settings.py` (Enums, paletas de colores, iconos, labels en español, `DEMO_USER_ID`) y `llm_config.py` (modelo Gemini `gemini-2.5-flash`, temperatura, embeddings).
+- **`config/`** — `settings.py` (Enums, paletas de colores, iconos, labels en español, `DEMO_USER_ID`) y `llm_config.py` (modelo OpenAI `gpt-4.1-nano`, temperatura, embeddings, reasoning effort).
 - **`models/`** — Dataclasses con `to_dict()`/`from_dict()` (Trip, ItineraryItem, Budget, UserProfile, Feedback). No se usan en runtime — los services operan directo sobre dicts.
 - **`data/`** — Archivos JSON de persistencia + `sample_data.py` (3 viajes demo: Tokio, Barcelona, Lima, ~32 items).
 - **`mcp_servers/`** — Servidor MCP standalone (`booking_server.py`) que expone `buscar_destinos` y `buscar_hoteles` como tools via FastMCP (transporte stdio).
@@ -54,7 +55,7 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 |---|---|
 | `supabase_client.py` | Cliente Supabase singleton. Lee `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` de `.env` |
 | `trip_service.py` | CRUD de viajes, agrupación de items por día, aceptar/descartar sugerencias, recálculo de presupuesto, sincronización con Supabase. Servicio central |
-| `agent_service.py` | Dispatcher principal del chat. Detecta `GOOGLE_API_KEY` y `RAPIDAPI_KEY`. Rutea a LLM, mock o Booking.com según contexto. Acciones de datos siempre por mock |
+| `agent_service.py` | Dispatcher principal del chat. Detecta `OPENAI_API_KEY` y `RAPIDAPI_KEY`. Rutea a LLM, mock o Booking.com según contexto. Acciones de datos siempre por mock |
 | `auth_service.py` | OAuth condicional (Authlib + secrets.toml). Guard `require_auth()`. CRUD de usuarios en Supabase |
 | `chat_service.py` | Multi-conversación por usuario. CRUD de chats, auto-título, persistencia en Supabase |
 | `llm_agent_service.py` | Wrapper delgado sobre `TripChatbot`. Importa condicionalmente |
@@ -64,6 +65,7 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 | `budget_service.py` | Cálculo de resumen de presupuesto por categoría. Excluye items sugeridos. Calcula progreso de planificación |
 | `profile_service.py` | Preferencias de usuario (alojamiento, alimentación, estilo, presupuesto, transporte). Persistencia en Supabase |
 | `feedback_service.py` | Retroalimentación post-viaje. Rating general + por item. Persistencia en Supabase |
+| `trip_creation_flow.py` | Flujo multi-turn de creación de viajes desde el chat. Detección de intención (strong/weak keywords), extracción de destino y fechas con regex, validación. Lógica pura sin Streamlit |
 | `weather_service.py` | Clima mock hardcodeado para Tokio, Barcelona, Lima. Default genérico para otros destinos |
 
 ### Páginas (`pages/`)
@@ -123,13 +125,25 @@ Tablas en Supabase (PostgreSQL):
 
 ## Chat — Dual mode (LLM / Mock)
 
-- `agent_service.py` detecta `GOOGLE_API_KEY` en el entorno. Si presente, delega consultas informativas a `llm_agent_service.py` → `llm_chatbot.py` (LangGraph + Gemini). Si ausente, usa pattern matching mock.
+- `agent_service.py` detecta `OPENAI_API_KEY` en el entorno. Si presente, delega consultas informativas a `llm_agent_service.py` → `llm_chatbot.py` (LangGraph + OpenAI gpt-4.1-nano). Si ausente, usa pattern matching mock.
 - Las **acciones que modifican datos** (crear viaje, agregar/eliminar items) **siempre** pasan por el mock para generar confirmaciones con botones UI, nunca por el LLM.
 - Los mensajes son dicts con `{role, type, content}`. `type` puede ser `"text"`, `"card"` (tarjeta rica), `"confirmation"` (acción pendiente con botones Confirmar/Cancelar) o `"hotel_results"` (resultados de Booking.com). Las confirmaciones procesadas se marcan con `msg["processed"] = True`.
 
+**Prioridad de ruteo en `agent_service.py`** (orden estricto):
+1. **Flujo de creación de viaje** (`trip_creation_flow.py`) — detecta intención de crear viaje, maneja multi-turn
+2. **Agregar/eliminar item** — pattern matching simple ("agregar", "eliminar") → confirmación UI
+3. **Búsqueda de hoteles** — si Booking.com activo y keywords de hotel detectados
+4. **LLM** — consultas informativas van a OpenAI gpt-4.1-nano
+5. **Fallback** — mensaje de "IA no disponible" si no hay API key
+
+**Detección de intención de creación de viaje** (`trip_creation_flow.py`):
+- Keywords **fuertes** ("quiero ir", "crear viaje", "me gustaría ir") → siempre disparan creación
+- Keywords **débiles** ("viaje", "vacaciones", "visitar") → NO disparan si el mensaje es una pregunta (`?`, `¿`) o refiere a un viaje existente ("mi viaje", "el viaje", "del viaje")
+- Protección anti-duplicado: si hay viaje activo al mismo destino, no inicia creación
+
 **Multi-conversación:** `chat_service.py` gestiona múltiples chats por usuario. Cada chat tiene `{chat_id, user_id, trip_id, title, messages}`. Auto-genera título desde el primer mensaje. Persistido en Supabase (tablas `chats` + `chat_messages`).
 
-**LLM Backend (LangGraph + Gemini):**
+**LLM Backend (LangGraph + OpenAI):**
 - `services/llm_chatbot.py` — `TripChatbot` (singleton). Pipeline LangGraph de 4 nodos secuenciales: memory_retrieval → context_optimization → response_generation → memory_extraction.
 - `services/memory_manager.py` — `TripMemoryManager`. ChromaDB para memorias vectoriales (importancia >= 2), SQLite para checkpoints LangGraph. Datos en `data/llm_data/`.
 - El system prompt inyecta: memorias vectoriales del usuario, contexto del viaje activo (destino, fechas, presupuesto, items), y perfil del usuario.
@@ -163,8 +177,8 @@ Tablas en Supabase (PostgreSQL):
 - Enums en `config/settings.py` usan valores en español (`"en_planificacion"`, `"confirmado"`, `"sugerido"`, etc.)
 - Persistencia: write-through a Supabase (tablas: users, profiles, trips, itinerary_items, chats, chat_messages, feedbacks)
 - Cada página envuelve su contenido en `try/except` con botón "Reintentar"
-- `GOOGLE_API_KEY` en `.env` habilita el LLM; sin ella, la app funciona idénticamente en modo mock
-- Servicios que dependen de APIs externas (Gemini, Booking.com) degradan graciosamente: retornan vacío o usan fallback mock
+- `OPENAI_API_KEY` en `.env` habilita el LLM; sin ella, la app funciona idénticamente en modo mock
+- Servicios que dependen de APIs externas (OpenAI, Booking.com) degradan graciosamente: retornan vacío o usan fallback mock
 - Singletons para `TripChatbot` y `TripMemoryManager` — una instancia por proceso
 
 ## Dependencias principales
@@ -176,7 +190,7 @@ Tablas en Supabase (PostgreSQL):
 | `plotly>=5.18.0` | Charts de presupuesto (donut, barras) |
 | `streamlit-calendar>=1.2.0` | Vista calendario FullCalendar.js |
 | `python-dotenv>=1.0.0` | Carga de `.env` |
-| `langchain-google-genai`, `langgraph`, `langgraph-checkpoint-sqlite` | Pipeline LLM con Gemini |
+| `langchain-openai`, `langgraph`, `langgraph-checkpoint-sqlite` | Pipeline LLM con OpenAI gpt-4.1-nano |
 | `langchain-chroma`, `chromadb` | Memoria vectorial |
 | `httpx>=0.25.0` | Cliente HTTP para Booking.com API |
 | `mcp[cli]>=1.2.0` | Servidor MCP (FastMCP) |

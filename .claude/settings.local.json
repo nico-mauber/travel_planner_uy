@@ -13,7 +13,11 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:elfsight.com)",
       "WebFetch(domain:lobehub.com)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:python.langchain.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:reference.langchain.com)"
     ]
   },
   "preferences": {

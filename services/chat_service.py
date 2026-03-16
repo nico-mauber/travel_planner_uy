@@ -65,27 +65,41 @@ def get_chat_by_id(chats: list, chat_id: str) -> Optional[dict]:
 
 
 def delete_chat(chat_id: str, user_id: str = None) -> bool:
-    """Elimina un chat por ID. CASCADE elimina mensajes."""
+    """Elimina un chat por ID. CASCADE elimina mensajes.
+
+    Requiere user_id para verificar ownership. Si no se proporciona,
+    se rechaza la operación por seguridad.
+    """
     from services.supabase_client import get_supabase_client
+
+    if not user_id:
+        return False
 
     sb = get_supabase_client()
 
-    if user_id:
-        # Verificar ownership
-        result = sb.table("chats").select("user_id").eq("chat_id", chat_id).execute()
-        if result.data and result.data[0].get("user_id") != user_id:
-            return False
+    # Verificar ownership
+    result = sb.table("chats").select("user_id").eq("chat_id", chat_id).execute()
+    if not result.data:
+        return False
+    if result.data[0].get("user_id") != user_id:
+        return False
 
     sb.table("chats").delete().eq("chat_id", chat_id).execute()
     return True
 
 
-def rename_chat(chat_id: str, new_title: str) -> bool:
-    """Renombra un chat en Supabase. Retorna True si exitoso."""
+def rename_chat(chat_id: str, new_title: str, user_id: str = None) -> bool:
+    """Renombra un chat en Supabase. Verifica ownership si user_id es proporcionado."""
     from services.supabase_client import get_supabase_client
 
     try:
         sb = get_supabase_client()
+
+        if user_id:
+            result = sb.table("chats").select("user_id").eq("chat_id", chat_id).execute()
+            if not result.data or result.data[0].get("user_id") != user_id:
+                return False
+
         sb.table("chats").update({"title": new_title}).eq("chat_id", chat_id).execute()
         return True
     except Exception:

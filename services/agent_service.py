@@ -1,8 +1,8 @@
-"""Servicio del agente — LLM (Gemini) + Booking.com. Sin fallback mock."""
+"""Servicio del agente — LLM (OpenAI gpt-4.1-nano) + Booking.com. Sin fallback mock."""
 
 import os
-import uuid
 import re
+import uuid
 import logging
 from typing import Optional
 
@@ -16,7 +16,7 @@ from services.trip_creation_flow import (
 logger = logging.getLogger(__name__)
 
 # ─── Detectar si el LLM está disponible ───
-_USE_LLM = bool(os.environ.get("GOOGLE_API_KEY"))
+_USE_LLM = bool(os.environ.get("OPENAI_API_KEY"))
 
 if _USE_LLM:
     try:
@@ -41,6 +41,36 @@ _HOTEL_KEYWORDS = [
     "habitacion", "habitación", "reservar hotel",
     "booking", "alojarnos", "hospedarnos",
 ]
+
+
+# ─── Patrones de prompt injection a sanitizar ───
+_INJECTION_PATTERNS = [
+    re.compile(r'ignora\s+(todas?\s+)?(las?\s+)?instrucciones?\s+(anteriores?|previas?|del?\s+sistema)', re.IGNORECASE),
+    re.compile(r'olvida\s+(todas?\s+)?(las?\s+)?instrucciones?\s+(anteriores?|previas?|del?\s+sistema)', re.IGNORECASE),
+    re.compile(r'ignore\s+(all\s+)?(previous|prior|above|system)\s+instructions?', re.IGNORECASE),
+    re.compile(r'forget\s+(all\s+)?(previous|prior|above|system)\s+instructions?', re.IGNORECASE),
+    re.compile(r'(eres|ahora\s+eres|act[uú]a\s+como|you\s+are\s+now|act\s+as)\s+(un|una|a|an)\s+', re.IGNORECASE),
+    re.compile(r'(nuevo|new)\s+(rol|role|modo|mode|persona)', re.IGNORECASE),
+    re.compile(r'(system|sistema)\s*:\s*', re.IGNORECASE),
+    re.compile(r'(mu[eé]strame|rev[eé]lame|dime|show\s+me|reveal)\s+(tu|el|the|your)\s+(system\s+)?prompt', re.IGNORECASE),
+    re.compile(r'(repite|repeat|print)\s+(tu|el|the|your)\s+(system\s+)?prompt', re.IGNORECASE),
+    re.compile(r'\[INST\]', re.IGNORECASE),
+    re.compile(r'<\|im_start\|>', re.IGNORECASE),
+    re.compile(r'###\s*(system|instruction|human|assistant)', re.IGNORECASE),
+]
+
+
+def _sanitize_user_input(msg: str) -> str:
+    """Sanitiza el mensaje del usuario eliminando patrones de prompt injection.
+
+    No bloquea el mensaje, solo limpia secuencias peligrosas.
+    """
+    sanitized = msg
+    for pattern in _INJECTION_PATTERNS:
+        sanitized = pattern.sub('', sanitized)
+    # Limpiar espacios múltiples resultantes
+    sanitized = re.sub(r' {2,}', ' ', sanitized).strip()
+    return sanitized or msg  # Si queda vacío, devolver original para no bloquear
 
 
 def is_llm_active() -> bool:
@@ -70,6 +100,8 @@ def process_message(message: str, trip: Optional[dict] = None,
       - content: str (texto) o dict (datos de tarjeta/confirmación)
       - _trip_creation_draft: (opcional) estado parcial del flujo de creación
     """
+    # Sanitizar input contra prompt injection antes de procesarlo
+    message = _sanitize_user_input(message)
     msg = message.lower().strip()
 
     # ─── Flujo multi-turn de creación de viaje ───
@@ -121,7 +153,7 @@ def process_message(message: str, trip: Optional[dict] = None,
         except Exception as e:
             logger.warning("Error en busqueda Booking.com: %s", e)
 
-    # ─── LLM (Gemini) ───
+    # ─── LLM (OpenAI) ───
     if _USE_LLM:
         try:
             import streamlit as st
@@ -144,7 +176,7 @@ def process_message(message: str, trip: Optional[dict] = None,
         "type": "text",
         "content": (
             "El asistente IA no esta disponible. "
-            "Configura `GOOGLE_API_KEY` en el archivo `.env` para habilitar Gemini.\n\n"
+            "Configura `OPENAI_API_KEY` en el archivo `.env` para habilitar gpt-4.1-nano.\n\n"
             "Mientras tanto, puedes:\n"
             "- Crear viajes desde **Mis Viajes**\n"
             "- Gestionar tu itinerario desde las secciones de la barra lateral"

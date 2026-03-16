@@ -1,7 +1,5 @@
 """Servicio de cálculos de presupuesto."""
 
-from typing import Dict, List, Optional
-
 from config.settings import (
     BudgetCategory, ItemStatus, ItemType,
     ITEM_TYPE_TO_BUDGET, BUDGET_CATEGORY_LABELS,

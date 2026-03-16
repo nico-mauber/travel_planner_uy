@@ -1,4 +1,4 @@
-"""Configuración del LLM (Gemini) y memoria vectorial."""
+"""Configuración del LLM (OpenAI) y memoria vectorial."""
 
 import os
 
@@ -8,9 +8,9 @@ LLM_DATA_DIR = os.path.join(BASE_DIR, "data", "llm_data")
 os.makedirs(LLM_DATA_DIR, exist_ok=True)
 
 # Configuración del modelo
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gpt-4.1-nano"
 DEFAULT_TEMPERATURE = 0.7
-DEFAULT_EMBEDDING_MODEL = "models/embedding-001"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
 # Configuración de memoria
 MAX_VECTOR_RESULTS = 3

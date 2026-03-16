@@ -3,7 +3,10 @@ data/llm_data/
 data/feedbacks.json
 data/users.json
 data/chats.json
+data/trips.json
+data/profiles.json
 .streamlit/secrets.toml
 venv/
 __pycache__/
 *.pyc
+=2.0.0

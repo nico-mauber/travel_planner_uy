@@ -5,6 +5,7 @@ import re
 import time
 import logging
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -14,9 +15,37 @@ logger = logging.getLogger(__name__)
 RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
 RAPIDAPI_HOST = os.environ.get("RAPIDAPI_BOOKING_HOST", "booking-com15.p.rapidapi.com")
 
+# Whitelist de dominios permitidos para llamadas API
+_ALLOWED_HOSTS = frozenset({
+    "booking-com15.p.rapidapi.com",
+    RAPIDAPI_HOST,
+})
+
 # Cache simple en memoria {key: {data, ts}}
 _cache: dict = {}
 _CACHE_TTL = 3600  # 1 hora
+
+
+def _validate_api_host(host: str) -> bool:
+    """Valida que el host esté en la whitelist de dominios permitidos."""
+    return host in _ALLOWED_HOSTS
+
+
+def _sanitize_query_param(value: str) -> str:
+    """Sanitiza un parámetro de query que proviene de input del usuario."""
+    # Remover caracteres de control y limitar longitud
+    sanitized = re.sub(r'[\x00-\x1f\x7f]', '', str(value))
+    return sanitized[:200].strip()
+
+
+def _validate_dest_id(dest_id: str) -> bool:
+    """Valida que dest_id sea alfanumérico (puede incluir guión/negativo)."""
+    return bool(re.match(r'^-?[a-zA-Z0-9_]+$', dest_id))
+
+
+def _validate_date(date_str: str) -> bool:
+    """Valida formato de fecha YYYY-MM-DD."""
+    return bool(re.match(r'^\d{4}-\d{2}-\d{2}$', date_str))
 
 
 def _headers() -> dict:
@@ -53,6 +82,14 @@ def search_destinations(query: str) -> list[dict]:
     Retorna lista de dicts con dest_id (city_ufi), name, country.
     """
     if not RAPIDAPI_KEY:
+        return []
+
+    if not _validate_api_host(RAPIDAPI_HOST):
+        logger.error("Host no permitido: %s", RAPIDAPI_HOST)
+        return []
+
+    query = _sanitize_query_param(query)
+    if not query:
         return []
 
     ck = _make_cache_key("dest", query=query)
@@ -119,6 +156,18 @@ def search_hotels(
     Endpoint: GET /api/v1/hotels/searchHotels
     """
     if not RAPIDAPI_KEY:
+        return []
+
+    if not _validate_api_host(RAPIDAPI_HOST):
+        logger.error("Host no permitido: %s", RAPIDAPI_HOST)
+        return []
+
+    if not _validate_dest_id(dest_id):
+        logger.warning("dest_id inválido: %s", dest_id)
+        return []
+
+    if not _validate_date(checkin) or not _validate_date(checkout):
+        logger.warning("Fechas inválidas: checkin=%s, checkout=%s", checkin, checkout)
         return []
 
     ck = _make_cache_key(

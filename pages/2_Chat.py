@@ -41,7 +41,7 @@ try:
     # Indicador de modo
     mode_parts = []
     if is_llm_active():
-        mode_parts.append("Gemini")
+        mode_parts.append("gpt-4.1-nano")
     else:
         mode_parts.append("Modo basico")
     if is_booking_active():
@@ -272,7 +272,7 @@ try:
             if len(user_messages) == 1:
                 new_title = auto_generate_title(user_input)
                 active_chat["title"] = new_title
-                rename_chat(active_chat["chat_id"], new_title)
+                rename_chat(active_chat["chat_id"], new_title, user_id=user_id)
 
             # Detectar contexto de viaje desde el mensaje
             detected = _find_trip_by_destination(user_input.lower(), trips)

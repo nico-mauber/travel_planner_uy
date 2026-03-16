@@ -16,14 +16,27 @@ _MESES = {
 _MESES_PATTERN = "|".join(_MESES.keys())
 
 # ─── Keywords de intención ───
-_CREATION_KEYWORDS = [
-    "viajar", "viaje", "ir a", "escapada", "vacaciones",
-    "planear", "planificar", "organizar", "conocer", "visitar",
+# Keywords fuertes: siempre disparan creación, incluso en preguntas
+_STRONG_CREATION_KEYWORDS = [
     "quiero ir", "vamos a", "me gustaria ir", "me gustaría ir",
     "quisiera ir", "quisiera viajar", "quisiera conocer",
     "quisiera visitar", "quiero conocer", "quiero visitar",
     "crear viaje", "crea viaje", "crear un viaje", "crea un viaje",
     "armar viaje", "armar un viaje", "hazme un viaje",
+    "quiero viajar", "planificar un viaje", "planear un viaje",
+    "organizar un viaje",
+]
+
+# Keywords débiles: solo disparan si NO es una pregunta sobre un viaje existente
+_WEAK_CREATION_KEYWORDS = [
+    "viajar", "viaje", "ir a", "escapada", "vacaciones",
+    "planear", "planificar", "organizar", "conocer", "visitar",
+]
+
+# Patrones que indican referencia a un viaje existente
+_EXISTING_TRIP_PATTERNS = [
+    "mi viaje", "el viaje", "nuestro viaje", "del viaje", "este viaje",
+    "mis vacaciones", "las vacaciones", "nuestras vacaciones",
 ]
 
 _CANCEL_KEYWORDS = [
@@ -126,9 +139,26 @@ def _parse_date(day: int, month_name: str, year_str: str = None) -> str:
 
 
 def detect_trip_creation_intent(msg: str) -> bool:
-    """Detecta si el mensaje tiene intención de crear un viaje."""
+    """Detecta si el mensaje tiene intención de crear un viaje.
+
+    Keywords fuertes (ej: "quiero ir", "crear viaje") siempre disparan.
+    Keywords débiles (ej: "viaje", "vacaciones") NO disparan si el mensaje
+    es una pregunta sobre un viaje existente.
+    """
     lower = msg.lower().strip()
-    return any(kw in lower for kw in _CREATION_KEYWORDS)
+
+    # Keywords fuertes siempre disparan
+    if any(kw in lower for kw in _STRONG_CREATION_KEYWORDS):
+        return True
+
+    # Si refiere a un viaje existente o es una pregunta, keywords débiles no disparan
+    refers_to_existing = any(p in lower for p in _EXISTING_TRIP_PATTERNS)
+    is_question = "?" in lower or "¿" in lower
+
+    if refers_to_existing or is_question:
+        return False
+
+    return any(kw in lower for kw in _WEAK_CREATION_KEYWORDS)
 
 
 def detect_cancel_intent(msg: str) -> bool:
@@ -157,11 +187,11 @@ def extract_trip_data(msg: str, current_draft: dict = None) -> dict:
                 break
 
         # Fallback: si hay draft activo (step=collecting) y no se encontró patrón,
-        # el mensaje completo podría ser el destino
+        # el mensaje podría ser solo el nombre del destino (ej: "Barcelona")
         if not draft.get("destination") and current_draft and current_draft.get("step") == "collecting":
-            # Si no tiene números ni keywords de fecha, asumir que es el destino
-            clean = lower.strip().strip(".,!?")
-            if clean and not re.search(r"\d", clean) and not any(
+            clean = lower.strip().strip(".,!?¿")
+            # Solo aceptar si es corto (<=4 palabras), sin números ni meses
+            if clean and len(clean.split()) <= 4 and not re.search(r"\d", clean) and not any(
                 m in clean for m in _MESES.keys()
             ):
                 draft["destination"] = clean.title()

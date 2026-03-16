@@ -1,5 +1,7 @@
 """Cronograma / Calendario (REQ-UI-004)."""
 
+import html
+
 import streamlit as st
 from datetime import date, timedelta
 
@@ -154,13 +156,15 @@ def _render_fallback_calendar(trip: dict, items: list) -> None:
                         color = ITEM_TYPE_COLORS.get(ItemType(item["item_type"]), "#9E9E9E")
                     except ValueError:
                         color = "#9E9E9E"
+                    safe_name = html.escape(item['name'])
+                    safe_loc = html.escape(item.get('location', ''))
                     st.markdown(
                         f"<div style='border-left: 4px solid {color}; "
                         f"padding: 8px 12px; margin: 4px 0; border-radius: 4px; "
                         f"background-color: #1E1E2E;'>"
-                        f"{status} {icon} <b>{item['name']}</b><br>"
+                        f"{status} {icon} <b>{safe_name}</b><br>"
                         f"🕐 {item['start_time']} — {item['end_time']}"
-                        f"{'&nbsp;&nbsp;📍 ' + item['location'] if item.get('location') else ''}"
+                        f"{'&nbsp;&nbsp;📍 ' + safe_loc if safe_loc else ''}"
                         f"</div>",
                         unsafe_allow_html=True,
                     )

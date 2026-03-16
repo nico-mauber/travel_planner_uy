@@ -14,7 +14,7 @@ from services.feedback_service import has_feedback, save_feedback
 from components.trip_card import render_trip_card
 
 
-def _render_feedback_section(trip: dict, idx: int) -> None:
+def _render_feedback_section(trip: dict, idx: int, user_id: str = None) -> None:
     """Renderiza la sección de feedback para un viaje completado."""
     with st.expander(f"📝 Dar feedback — {trip['name']}", expanded=False):
         with st.form(f"feedback_form_{trip['id']}_{idx}"):
@@ -72,7 +72,7 @@ def _render_feedback_section(trip: dict, idx: int) -> None:
                     "comment": comment,
                     "item_feedbacks": item_feedbacks,
                 }
-                if save_feedback(trip["id"], feedback_data):
+                if save_feedback(trip["id"], feedback_data, user_id=user_id):
                     st.success("¡Gracias por tu feedback!")
                     st.rerun()
                 else:
@@ -86,7 +86,7 @@ def _render_feedback_section(trip: dict, idx: int) -> None:
                     "comment": "Omitido",
                     "item_feedbacks": [],
                     "skipped": True,
-                })
+                }, user_id=user_id)
                 st.rerun()
 
 
@@ -208,7 +208,7 @@ try:
         result = render_trip_card(trip, idx)
 
         if needs_feedback:
-            _render_feedback_section(trip, idx)
+            _render_feedback_section(trip, idx, user_id=user_id)
 
         if result.get("action") == "view":
             st.session_state.active_trip_id = result["trip_id"]

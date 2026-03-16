@@ -1,12 +1,22 @@
 """Servicio de retroalimentación post-viaje — Supabase backend."""
 
 
-def save_feedback(trip_id: str, feedback: dict) -> bool:
-    """Guarda feedback para un viaje en Supabase (upsert por trip_id)."""
+def save_feedback(trip_id: str, feedback: dict, user_id: str = None) -> bool:
+    """Guarda feedback para un viaje en Supabase (upsert por trip_id).
+
+    Si user_id es proporcionado, verifica que el viaje pertenezca al usuario.
+    """
     from services.supabase_client import get_supabase_client
 
     try:
         sb = get_supabase_client()
+
+        # Verificar ownership del viaje
+        if user_id:
+            trip_result = sb.table("trips").select("user_id").eq("id", trip_id).execute()
+            if not trip_result.data or trip_result.data[0].get("user_id") != user_id:
+                return False
+
         row = {
             "trip_id": trip_id,
             "overall_rating": int(feedback.get("overall_rating", 0)),

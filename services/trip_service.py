@@ -4,7 +4,7 @@ import uuid
 from datetime import date
 from typing import Optional
 
-from config.settings import TripStatus, ItemStatus
+from config.settings import TripStatus, ItemStatus, DEMO_USER_ID
 
 
 # ─── Helpers de conversión DB → dict ───
@@ -81,7 +81,7 @@ def load_trips(user_id: Optional[str] = None) -> list:
     from services.supabase_client import get_supabase_client
     from services.auth_service import ensure_user_exists
 
-    uid = user_id or "user-demo0001"
+    uid = user_id or DEMO_USER_ID
     ensure_user_exists(uid)
     sb = get_supabase_client()
 
@@ -118,7 +118,7 @@ def _insert_trip_to_db(sb, trip: dict) -> None:
     """Inserta un viaje completo (trip + items) en Supabase."""
     trip_row = {
         "id": trip["id"],
-        "user_id": trip.get("user_id", "user-demo0001"),
+        "user_id": trip.get("user_id", DEMO_USER_ID),
         "name": trip.get("name", ""),
         "destination": trip.get("destination", ""),
         "start_date": trip.get("start_date"),
@@ -141,7 +141,7 @@ def create_trip(trips: list, name: str, destination: str,
     from services.supabase_client import get_supabase_client
     from services.auth_service import ensure_user_exists
 
-    _uid = user_id or "user-demo0001"
+    _uid = user_id or DEMO_USER_ID
     ensure_user_exists(_uid)
 
     trip = {
@@ -164,11 +164,14 @@ def create_trip(trips: list, name: str, destination: str,
 
 
 def delete_trip(trips: list, trip_id: str, user_id: Optional[str] = None) -> bool:
-    """Elimina un viaje (solo si está en planificación). CASCADE elimina items."""
+    """Elimina un viaje (solo si está en planificación y pertenece al usuario). CASCADE elimina items."""
     from services.supabase_client import get_supabase_client
 
     for i, trip in enumerate(trips):
         if trip["id"] == trip_id:
+            # Verificar ownership si se proporcionó user_id
+            if user_id and trip.get("user_id") and trip["user_id"] != user_id:
+                return False
             if trip["status"] == TripStatus.PLANNING.value:
                 trips.pop(i)
                 sb = get_supabase_client()

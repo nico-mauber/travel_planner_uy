@@ -145,12 +145,68 @@ ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.feedbacks ENABLE ROW LEVEL SECURITY;
 
--- Politicas permisivas (service_role bypasea RLS por defecto,
--- estas politicas son para acceso con anon key si se necesita en el futuro)
-CREATE POLICY users_self ON public.users FOR ALL USING (true);
-CREATE POLICY profiles_self ON public.profiles FOR ALL USING (true);
-CREATE POLICY trips_self ON public.trips FOR ALL USING (true);
-CREATE POLICY items_self ON public.itinerary_items FOR ALL USING (true);
-CREATE POLICY chats_self ON public.chats FOR ALL USING (true);
-CREATE POLICY messages_self ON public.chat_messages FOR ALL USING (true);
-CREATE POLICY feedbacks_self ON public.feedbacks FOR ALL USING (true);
+-- Politicas RLS por usuario.
+-- La app actualmente usa service_role key (que bypasea RLS), pero estas
+-- policies aseguran aislamiento correcto cuando se migre a anon_key.
+-- Se usa current_setting('app.current_user_id', true) porque la app
+-- maneja user_id como TEXT propio (no UUID de auth.users de Supabase).
+
+-- users: cada usuario solo ve/modifica su propio registro
+CREATE POLICY users_self ON public.users
+  FOR ALL
+  USING (user_id = current_setting('app.current_user_id', true)::text)
+  WITH CHECK (user_id = current_setting('app.current_user_id', true)::text);
+
+-- profiles: cada usuario solo ve/modifica su propio perfil
+CREATE POLICY profiles_self ON public.profiles
+  FOR ALL
+  USING (user_id = current_setting('app.current_user_id', true)::text)
+  WITH CHECK (user_id = current_setting('app.current_user_id', true)::text);
+
+-- trips: cada usuario solo ve/modifica sus propios viajes
+CREATE POLICY trips_self ON public.trips
+  FOR ALL
+  USING (user_id = current_setting('app.current_user_id', true)::text)
+  WITH CHECK (user_id = current_setting('app.current_user_id', true)::text);
+
+-- itinerary_items: solo items de viajes del usuario
+CREATE POLICY items_self ON public.itinerary_items
+  FOR ALL
+  USING (trip_id IN (
+    SELECT id FROM public.trips
+    WHERE user_id = current_setting('app.current_user_id', true)::text
+  ))
+  WITH CHECK (trip_id IN (
+    SELECT id FROM public.trips
+    WHERE user_id = current_setting('app.current_user_id', true)::text
+  ));
+
+-- chats: cada usuario solo ve/modifica sus propios chats
+CREATE POLICY chats_self ON public.chats
+  FOR ALL
+  USING (user_id = current_setting('app.current_user_id', true)::text)
+  WITH CHECK (user_id = current_setting('app.current_user_id', true)::text);
+
+-- chat_messages: solo mensajes de chats del usuario
+CREATE POLICY messages_self ON public.chat_messages
+  FOR ALL
+  USING (chat_id IN (
+    SELECT chat_id FROM public.chats
+    WHERE user_id = current_setting('app.current_user_id', true)::text
+  ))
+  WITH CHECK (chat_id IN (
+    SELECT chat_id FROM public.chats
+    WHERE user_id = current_setting('app.current_user_id', true)::text
+  ));
+
+-- feedbacks: solo feedback de viajes del usuario
+CREATE POLICY feedbacks_self ON public.feedbacks
+  FOR ALL
+  USING (trip_id IN (
+    SELECT id FROM public.trips
+    WHERE user_id = current_setting('app.current_user_id', true)::text
+  ))
+  WITH CHECK (trip_id IN (
+    SELECT id FROM public.trips
+    WHERE user_id = current_setting('app.current_user_id', true)::text
+  ));

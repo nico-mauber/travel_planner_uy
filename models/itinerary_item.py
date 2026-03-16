@@ -1,7 +1,6 @@
 """Modelo de item del itinerario."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from config.settings import ItemStatus, ItemType
 
