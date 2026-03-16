@@ -9,4 +9,5 @@ data/profiles.json
 venv/
 __pycache__/
 *.pyc
+.claude/
 =*
