@@ -52,9 +52,9 @@ def _render_fallback_calendar(valid_trips: list) -> None:
                 icon = ITEM_TYPE_ICONS.get(ItemType(item["item_type"]), "")
                 status = STATUS_ICONS.get(ItemStatus(item["status"]), "")
                 try:
-                    color = ITEM_TYPE_COLORS.get(ItemType(item["item_type"]), "#9E9E9E")
+                    color = ITEM_TYPE_COLORS.get(ItemType(item["item_type"]), "#8B949E")
                 except ValueError:
-                    color = "#9E9E9E"
+                    color = "#8B949E"
 
                 is_multiday = item.get("end_day") and item["end_day"] > item["day"]
                 duration_label = f" (Dias {item['day']}-{item['end_day']})" if is_multiday else ""
@@ -66,9 +66,7 @@ def _render_fallback_calendar(valid_trips: list) -> None:
                 safe_loc = html.escape(item.get("location", ""))
                 time_display = f"Todo el dia{duration_label}" if is_multiday else f"{item['start_time']} — {item['end_time']}"
                 st.markdown(
-                    f"<div style='border-left: 4px solid {color}; "
-                    f"padding: 8px 12px; margin: 4px 0; border-radius: 4px; "
-                    f"background-color: #1E1E2E;'>"
+                    f"<div class='tp-calendar-event' style='border-left-color: {color};'>"
                     f"🌍 <i>{safe_dest}</i>&nbsp;&nbsp;"
                     f"{status} {icon} <b>{safe_name}</b>{html.escape(duration_label)}<br>"
                     f"🕐 {time_display}"
@@ -82,6 +80,7 @@ try:
     trips = st.session_state.trips
 
     st.title("Cronograma")
+    st.caption("Vista global de todas las actividades planificadas en todos tus viajes.")
 
     # ─── Recopilar items de TODOS los viajes con fechas definidas ───
     all_events_data = []  # Lista de (trip, item) tuples
@@ -100,15 +99,30 @@ try:
         st.info(
             "No hay actividades en ningun viaje. Usa el **Chat** para comenzar a planificar."
         )
-        if st.button("Abrir Chat"):
+        if st.button("Abrir Chat", help="Ir al chat para planificar actividades"):
             st.switch_page("pages/2_Chat.py")
         st.stop()
 
     # ─── Selector de vista ───
     view = st.radio(
-        "Vista", ["Semana", "Dia", "Mes"],
+        "Tipo de vista del calendario",
+        ["Semana", "Dia", "Mes"],
         horizontal=True,
-        label_visibility="collapsed",
+        help="Selecciona como quieres visualizar el cronograma",
+    )
+
+    # ─── Leyenda de tipos de items ───
+    st.markdown(
+        '<div style="display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 0.75rem;">'
+        '<span class="tp-calendar-event" style="border-left-color: #56D364; display: inline-block; padding: 2px 8px;">Actividad</span>'
+        '<span class="tp-calendar-event" style="border-left-color: #58A6FF; display: inline-block; padding: 2px 8px;">Alojamiento</span>'
+        '<span class="tp-calendar-event" style="border-left-color: #FFA657; display: inline-block; padding: 2px 8px;">Comida</span>'
+        '<span class="tp-calendar-event" style="border-left-color: #FF7B72; display: inline-block; padding: 2px 8px;">Vuelo</span>'
+        '<span class="tp-calendar-event" style="border-left-color: #8B949E; display: inline-block; padding: 2px 8px;">Traslado</span>'
+        '<span class="tp-calendar-event" style="border-left-color: #BC8CFF; display: inline-block; padding: 2px 8px;">Extra</span>'
+        '<span class="tp-calendar-event" style="border-left-color: #607D8B; display: inline-block; padding: 2px 8px;">Multi-dia</span>'
+        '</div>',
+        unsafe_allow_html=True,
     )
 
     # ─── Intentar usar streamlit-calendar ───
@@ -134,9 +148,9 @@ try:
 
             item_type = item.get("item_type", "extra")
             try:
-                color = ITEM_TYPE_COLORS.get(ItemType(item_type), "#9E9E9E")
+                color = ITEM_TYPE_COLORS.get(ItemType(item_type), "#8B949E")
             except ValueError:
-                color = "#9E9E9E"
+                color = "#8B949E"
 
             if item["status"] == ItemStatus.SUGGESTED.value:
                 color = color + "80"
@@ -224,5 +238,5 @@ try:
 
 except Exception as e:
     st.error(f"Error al cargar el cronograma: {e}")
-    if st.button("Reintentar"):
+    if st.button("Reintentar", help="Recargar la pagina del cronograma"):
         st.rerun()

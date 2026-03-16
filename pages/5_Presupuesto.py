@@ -14,7 +14,7 @@ from components.budget_charts import render_donut_chart, render_comparison_bars
 try:
     trips = st.session_state.trips
 
-    st.title("💰 Presupuesto")
+    st.title("Presupuesto")
 
     # ─── Selector de viaje ───
     active_statuses = [TripStatus.PLANNING.value, TripStatus.CONFIRMED.value, TripStatus.IN_PROGRESS.value]
@@ -22,7 +22,7 @@ try:
 
     if not available_trips:
         st.info("No hay viajes activos. Ve a **Mis Viajes** para crear uno.")
-        if st.button("🌍 Ir a Mis Viajes", type="primary"):
+        if st.button("Ir a Mis Viajes", type="primary", help="Navegar a la pagina de gestion de viajes"):
             st.switch_page("pages/7_Mis_Viajes.py")
         st.stop()
 
@@ -52,10 +52,14 @@ try:
     items = trip.get("items", [])
     budget = calculate_budget_summary(items)
 
-    # ─── Fila 1: Métrica principal ───
+    # ─── Fila 1: Metrica principal ───
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Presupuesto estimado", f"USD {budget['total_estimated']:,.0f}")
+        st.metric(
+            "Presupuesto estimado",
+            f"USD {budget['total_estimated']:,.0f}",
+            help="Suma de costos estimados de todos los items confirmados y pendientes",
+        )
     with col2:
         if budget["total_real"] > 0:
             diff = budget["total_real"] - budget["total_estimated"]
@@ -64,16 +68,23 @@ try:
                 f"USD {budget['total_real']:,.0f}",
                 delta=f"USD {diff:,.0f}",
                 delta_color="inverse",
+                help="Gasto real registrado. El delta muestra la diferencia respecto al estimado",
             )
         else:
-            st.metric("Gasto real", "Sin datos")
+            st.metric(
+                "Gasto real", "Sin datos",
+                help="Aun no hay gastos reales registrados para este viaje",
+            )
     with col3:
         items_count = sum(
             len(cat_data["items"]) for cat_data in budget["by_category"].values()
         )
-        st.metric("Items contabilizados", items_count)
+        st.metric(
+            "Items contabilizados", items_count,
+            help="Cantidad de items con costo incluidos en el presupuesto (excluye sugeridos)",
+        )
 
-    st.markdown("---")
+    st.divider()
 
     if not items or budget["total_estimated"] == 0:
         st.info("No hay items con costos para mostrar el presupuesto.")
@@ -83,7 +94,7 @@ try:
     col_chart, col_table = st.columns(2)
 
     with col_chart:
-        st.subheader("Distribución por categoría")
+        st.subheader("Distribucion por categoria")
         render_donut_chart(budget)
 
     with col_table:
@@ -94,17 +105,37 @@ try:
             if cat_data["estimated"] > 0 or cat_data["real"] > 0:
                 diff = cat_data["real"] - cat_data["estimated"] if cat_data["real"] > 0 else 0
                 table_data.append({
-                    "Categoría": BUDGET_CATEGORY_LABELS[cat],
-                    "Estimado (USD)": f"{cat_data['estimated']:,.0f}",
-                    "Real (USD)": f"{cat_data['real']:,.0f}" if cat_data["real"] > 0 else "—",
-                    "Diferencia": f"{diff:+,.0f}" if cat_data["real"] > 0 else "—",
+                    "Categoria": BUDGET_CATEGORY_LABELS[cat],
+                    "Estimado (USD)": cat_data["estimated"],
+                    "Real (USD)": cat_data["real"] if cat_data["real"] > 0 else None,
+                    "Diferencia": diff if cat_data["real"] > 0 else None,
                 })
 
         if table_data:
+            import pandas as pd
+            df = pd.DataFrame(table_data)
             st.dataframe(
-                table_data,
+                df,
                 use_container_width=True,
                 hide_index=True,
+                column_config={
+                    "Categoria": st.column_config.TextColumn("Categoria"),
+                    "Estimado (USD)": st.column_config.NumberColumn(
+                        "Estimado (USD)",
+                        format="$ %.0f",
+                        help="Costo estimado de todos los items en esta categoria",
+                    ),
+                    "Real (USD)": st.column_config.NumberColumn(
+                        "Real (USD)",
+                        format="$ %.0f",
+                        help="Gasto real registrado en esta categoria",
+                    ),
+                    "Diferencia": st.column_config.NumberColumn(
+                        "Diferencia",
+                        format="$ %+.0f",
+                        help="Diferencia entre gasto real y estimado (positivo = sobrecosto)",
+                    ),
+                },
             )
 
             # Totales
@@ -116,13 +147,13 @@ try:
 
     # ─── Fila 3: Barras comparativas ───
     if has_real_costs(items):
-        st.markdown("---")
-        st.subheader("📊 Comparación estimado vs. real")
+        st.divider()
+        st.subheader("Comparacion: estimado vs. real")
         render_comparison_bars(budget)
 
     # ─── Fila 4: Drill-down por categoría ───
-    st.markdown("---")
-    st.subheader("📂 Detalle por categoría")
+    st.divider()
+    st.subheader("Detalle por categoria")
 
     for cat in BudgetCategory:
         cat_data = budget["by_category"][cat.value]
@@ -131,8 +162,9 @@ try:
             continue
 
         color = BUDGET_CATEGORY_COLORS[cat]
+        n_items = len(cat_items)
         with st.expander(
-            f"{BUDGET_CATEGORY_LABELS[cat]} — USD {cat_data['estimated']:,.0f} estimado"
+            f"{BUDGET_CATEGORY_LABELS[cat]} — USD {cat_data['estimated']:,.0f} estimado ({n_items} item{'s' if n_items != 1 else ''})"
         ):
             for item in cat_items:
                 icon = ITEM_TYPE_ICONS.get(ItemType(item["item_type"]), "📦")
@@ -148,5 +180,5 @@ try:
 
 except Exception as e:
     st.error(f"Error al cargar el presupuesto: {e}")
-    if st.button("🔄 Reintentar"):
+    if st.button("Reintentar", help="Recargar la pagina de presupuesto"):
         st.rerun()

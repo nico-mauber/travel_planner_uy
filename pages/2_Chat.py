@@ -27,15 +27,14 @@ try:
 
     st.title("Chat con el Agente")
 
-    # Indicador de modo
-    mode_parts = []
+    # Indicador de modo — texto descriptivo ademas de nombre de modelo
     if is_llm_active():
-        mode_parts.append("gpt-4.1-nano")
+        mode_label = "LLM activo (gpt-4.1-nano) — respuestas inteligentes habilitadas"
     else:
-        mode_parts.append("Modo basico")
+        mode_label = "Modo basico — solo acciones por patron, sin LLM"
     if is_booking_active():
-        mode_parts.append("Booking.com")
-    st.caption(f"Asistente IA ({' + '.join(mode_parts)})")
+        mode_label += " + Busqueda de hoteles (Booking.com)"
+    st.caption(mode_label)
 
     # ─── Selector obligatorio de viaje (REQ-CF-001) ───
     active_statuses = [TripStatus.PLANNING.value, TripStatus.CONFIRMED.value, TripStatus.IN_PROGRESS.value]
@@ -125,11 +124,11 @@ try:
 
     # ─── Columna izquierda: lista de chats ───
     with col_list:
-        st.markdown("#### Conversaciones")
+        st.subheader("Conversaciones")
 
         # Boton nuevo chat
         if chat_enabled:
-            if st.button("Nuevo Chat", use_container_width=True, type="primary"):
+            if st.button("Nuevo Chat", use_container_width=True, type="primary", help="Crear una nueva conversacion con el asistente"):
                 new_chat = create_chat(
                     user_id=user_id,
                     trip_id=chat_trip["id"] if chat_trip else None,
@@ -139,7 +138,7 @@ try:
                 st.session_state.user_chats = load_chats(user_id)
                 st.rerun()
 
-        st.markdown("---")
+        st.divider()
 
         # Cargar chats del usuario
         if "user_chats" not in st.session_state:
@@ -180,7 +179,7 @@ try:
                         if st.button(
                             "X",
                             key=f"del_{chat_id}",
-                            help="Eliminar conversacion",
+                            help="Eliminar esta conversacion permanentemente",
                         ):
                             st.session_state._confirm_delete_chat = chat_id
                             st.rerun()
@@ -188,10 +187,10 @@ try:
             # Confirmacion de eliminacion de chat
             if st.session_state.get("_confirm_delete_chat"):
                 _del_id = st.session_state._confirm_delete_chat
-                st.warning("Eliminar esta conversacion?")
+                st.warning("Eliminar esta conversacion? Esta accion no se puede deshacer.")
                 dc1, dc2 = st.columns(2)
                 with dc1:
-                    if st.button("Si, eliminar", key="confirm_del_chat", type="primary"):
+                    if st.button("Si, eliminar conversacion", key="confirm_del_chat", type="primary", help="Confirmar eliminacion permanente"):
                         delete_chat(_del_id, user_id=user_id)
                         if active_chat_id == _del_id:
                             st.session_state.active_chat_id = None
@@ -199,7 +198,7 @@ try:
                         st.session_state.user_chats = load_chats(user_id)
                         st.rerun()
                 with dc2:
-                    if st.button("Cancelar", key="cancel_del_chat"):
+                    if st.button("Cancelar eliminacion", key="cancel_del_chat", help="No eliminar, mantener la conversacion"):
                         st.session_state._confirm_delete_chat = None
                         st.rerun()
 
@@ -225,7 +224,7 @@ try:
         else:
             st.caption("Sin viaje asociado")
 
-        st.markdown("---")
+        st.divider()
 
         # ─── Historial del chat activo ───
         history = active_chat.get("messages", [])
@@ -354,7 +353,7 @@ try:
                             st.rerun()
 
         # ─── Input del usuario ───
-        if user_input := st.chat_input("Escribe tu mensaje..."):
+        if user_input := st.chat_input("Escribe tu mensaje al asistente de viajes..."):
             # Agregar mensaje del usuario
             user_msg = {
                 "role": "user",
@@ -404,5 +403,5 @@ try:
 
 except Exception as e:
     st.error(f"Error en el chat: {e}")
-    if st.button("Reintentar"):
+    if st.button("Reintentar", help="Recargar la pagina del chat"):
         st.rerun()

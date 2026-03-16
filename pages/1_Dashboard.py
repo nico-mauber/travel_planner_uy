@@ -12,12 +12,12 @@ from components.alert_banner import get_alerts, render_alerts
 try:
     trips = st.session_state.trips
 
-    st.title("📊 Dashboard")
+    st.title("Dashboard")
 
     # ─── Banner feedback pendiente ───
     if has_pending_feedback(trips):
         st.info(
-            "📝 Tienes viajes completados sin retroalimentación. "
+            "Tienes viajes completados sin retroalimentacion. "
             "Ve a **Mis Viajes** para dar tu feedback."
         )
 
@@ -29,10 +29,10 @@ try:
         st.info("No hay viajes activos. Ve a **Mis Viajes** para crear uno.")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🌍 Ir a Mis Viajes", type="primary", use_container_width=True):
+            if st.button("Ir a Mis Viajes", type="primary", use_container_width=True, help="Navegar a la pagina de gestion de viajes"):
                 st.switch_page("pages/7_Mis_Viajes.py")
         with col2:
-            if st.button("💬 Abrir Chat", use_container_width=True):
+            if st.button("Abrir Chat", use_container_width=True, help="Navegar al chat con el asistente"):
                 st.switch_page("pages/2_Chat.py")
         st.stop()
 
@@ -58,8 +58,8 @@ try:
         st.stop()
 
     # ─── Dashboard con viaje activo ───
-    st.subheader(f"{trip['name']}")
-    st.caption(f"📍 {trip['destination']} — {trip['start_date']} a {trip['end_date']}")
+    st.header(f"{trip['name']}")
+    st.caption(f"Destino: {trip['destination']} — {trip['start_date']} a {trip['end_date']}")
 
     # ─── Fila 1: Métricas ───
     items = trip.get("items", [])
@@ -72,56 +72,76 @@ try:
 
     m1, m2, m3, m4 = st.columns(4)
     with m1:
-        st.metric("Destino", trip["destination"].split(",")[0])
+        st.metric(
+            "Destino", trip["destination"].split(",")[0],
+            help="Ciudad o region principal del viaje",
+        )
     with m2:
         if days_left > 0:
-            st.metric("Días restantes", f"{days_left} días")
+            st.metric(
+                "Dias restantes", f"{days_left} dias",
+                help="Dias hasta la fecha de inicio del viaje",
+            )
         elif days_left == 0:
-            st.metric("Estado", "¡Hoy empieza!")
+            st.metric(
+                "Estado", "Hoy empieza",
+                help="El viaje comienza hoy",
+            )
         else:
-            st.metric("Estado", "En curso / Completado")
+            st.metric(
+                "Estado", "En curso / Completado",
+                help="El viaje ya esta en curso o ha finalizado",
+            )
     with m3:
-        st.metric("Presupuesto", f"USD {budget['total_estimated']:,.0f}")
+        st.metric(
+            "Presupuesto", f"USD {budget['total_estimated']:,.0f}",
+            help="Suma de costos estimados de todos los items confirmados y pendientes",
+        )
     with m4:
-        st.metric("Items confirmados", f"{len(confirmed)}/{len(non_suggested)}")
+        st.metric(
+            "Items confirmados", f"{len(confirmed)}/{len(non_suggested)}",
+            help="Cantidad de items confirmados sobre el total de items no sugeridos",
+        )
 
-    st.markdown("---")
+    st.divider()
 
     # ─── Fila 2: Progreso ───
-    st.subheader("📈 Progreso de planificación")
+    st.subheader("Progreso de planificacion")
     progress = calculate_planning_progress(items)
-    st.progress(progress, text=f"{progress * 100:.0f}% completado")
+    progress_pct = f"{progress * 100:.0f}%"
+    st.progress(progress, text=f"{progress_pct} completado")
+    st.caption(f"Progreso de planificacion: {progress_pct} de los items estan confirmados.")
 
     status_label = TRIP_STATUS_LABELS.get(TripStatus(trip["status"]), trip["status"])
     total_days = (date.fromisoformat(trip["end_date"]) - start_date).days + 1
     st.caption(f"Estado: **{status_label}** — Duración: **{total_days} días**")
 
-    st.markdown("---")
+    st.divider()
 
     # ─── Fila 3: Alertas ───
     alerts = get_alerts(trip)
     if alerts:
-        st.subheader("🔔 Alertas")
+        st.subheader("Alertas")
         render_alerts(alerts)
-        st.markdown("---")
+        st.divider()
 
-    # ─── Fila 4: Accesos rápidos ───
-    st.subheader("⚡ Accesos rápidos")
+    # ─── Fila 4: Accesos rapidos ───
+    st.subheader("Accesos rapidos")
     q1, q2, q3, q4 = st.columns(4)
     with q1:
-        if st.button("💬 Chat", use_container_width=True):
+        if st.button("Chat", use_container_width=True, help="Abrir el chat con el asistente de viajes"):
             st.switch_page("pages/2_Chat.py")
     with q2:
-        if st.button("📅 Cronograma", use_container_width=True):
+        if st.button("Cronograma", use_container_width=True, help="Ver el calendario con todas las actividades"):
             st.switch_page("pages/3_Cronograma.py")
     with q3:
-        if st.button("📋 Itinerario", use_container_width=True):
+        if st.button("Itinerario", use_container_width=True, help="Ver el itinerario detallado dia a dia"):
             st.switch_page("pages/4_Itinerario.py")
     with q4:
-        if st.button("💰 Presupuesto", use_container_width=True):
+        if st.button("Presupuesto", use_container_width=True, help="Ver el desglose de costos del viaje"):
             st.switch_page("pages/5_Presupuesto.py")
 
 except Exception as e:
     st.error(f"Error al cargar el dashboard: {e}")
-    if st.button("🔄 Reintentar"):
+    if st.button("Reintentar", help="Recargar la pagina del dashboard"):
         st.rerun()

@@ -16,6 +16,7 @@ logging.basicConfig(
 import streamlit as st
 
 from config.settings import TRIP_STATUS_LABELS, TripStatus
+from config.styles import get_global_css
 from services.trip_service import load_trips, get_active_trip, update_trip_statuses
 from services.auth_service import is_auth_enabled, require_auth, get_current_user_id
 from services.chat_service import load_chats
@@ -29,47 +30,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─── CSS custom ───
-st.markdown("""
-<style>
-    /* Badge de estado */
-    .status-badge {
-        display: inline-block;
-        padding: 2px 10px;
-        border-radius: 12px;
-        font-size: 0.85em;
-        font-weight: 500;
-    }
-    .status-planning { background-color: #3E2E00; color: #FFD54F; }
-    .status-confirmed { background-color: #1B3A1B; color: #66BB6A; }
-    .status-in-progress { background-color: #0D2744; color: #64B5F6; }
-    .status-completed { background-color: #2A2A2A; color: #9E9E9E; }
+# ─── CSS del design system ───
+st.markdown(f"<style>{get_global_css()}</style>", unsafe_allow_html=True)
 
-    /* Items sugeridos */
-    .suggested-item {
-        border: 2px dashed #FFB74D !important;
-        opacity: 0.85;
-    }
-
-    /* Sidebar viaje activo */
-    .active-trip-box {
-        background-color: #1A2332;
-        padding: 12px;
-        border-radius: 8px;
-        border-left: 4px solid #42A5F5;
-        margin-bottom: 12px;
-    }
-
-    /* Transfers */
-    .transfer-block {
-        background-color: #1E1E2E;
-        padding: 8px 16px;
-        border-radius: 8px;
-        border-left: 3px solid #78909C;
-        margin: 4px 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+# ─── Skip link para accesibilidad por teclado ───
+st.markdown(
+    '<a href="#main-content" class="tp-skip-link">Saltar al contenido principal</a>',
+    unsafe_allow_html=True,
+)
 
 # ─── Verificar conexión Supabase ───
 from services.supabase_client import is_supabase_available
@@ -171,13 +139,14 @@ with st.sidebar:
     # Info del usuario autenticado
     current_user = st.session_state.get("current_user")
     if current_user:
+        user_name = current_user.get("name", "Usuario")
         user_cols = st.columns([0.25, 0.75])
         with user_cols[0]:
             picture = current_user.get("picture", "")
             if picture:
-                st.image(picture, width=40)
+                st.image(picture, width=40, caption=f"Foto de {user_name}")
         with user_cols[1]:
-            st.markdown(f"**{current_user.get('name', '')}**")
+            st.markdown(f"**{user_name}**")
             st.caption(current_user.get("email", ""))
 
     st.divider()
@@ -189,20 +158,20 @@ with st.sidebar:
             TripStatus(trip["status"]), trip["status"]
         )
         status_class = {
-            TripStatus.PLANNING.value: "status-planning",
-            TripStatus.CONFIRMED.value: "status-confirmed",
-            TripStatus.IN_PROGRESS.value: "status-in-progress",
-            TripStatus.COMPLETED.value: "status-completed",
+            TripStatus.PLANNING.value: "tp-status-badge--planning",
+            TripStatus.CONFIRMED.value: "tp-status-badge--confirmed",
+            TripStatus.IN_PROGRESS.value: "tp-status-badge--in-progress",
+            TripStatus.COMPLETED.value: "tp-status-badge--completed",
         }.get(trip["status"], "")
 
         safe_name = html.escape(trip['name'])
         safe_dest = html.escape(trip['destination'])
         st.markdown(
-            f"""<div class="active-trip-box">
+            f"""<div class="tp-active-trip-box">
             <strong>{safe_name}</strong><br>
             📍 {safe_dest}<br>
             📅 {trip['start_date']} → {trip['end_date']}<br>
-            <span class="status-badge {status_class}">{status_label}</span>
+            <span class="tp-status-badge {status_class}">{status_label}</span>
             </div>""",
             unsafe_allow_html=True,
         )
@@ -215,13 +184,13 @@ with st.sidebar:
     st.divider()
 
     # Botón fijo "Abrir Chat"
-    if st.button("💬 Abrir Chat", use_container_width=True):
+    if st.button("💬 Abrir Chat", use_container_width=True, help="Ir a la página del chat con el asistente de viajes"):
         st.switch_page("pages/2_Chat.py")
 
     # Boton de cerrar sesion (solo si auth habilitada)
     if is_auth_enabled() and current_user:
         st.divider()
-        if st.button("Cerrar sesion", use_container_width=True):
+        if st.button("Cerrar sesion", use_container_width=True, help="Cierra tu sesion actual de Google"):
             st.logout()
 
 # ─── Ejecutar página ───

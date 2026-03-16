@@ -14,7 +14,7 @@ from components.itinerary_item import render_itinerary_item, render_transfer
 try:
     trips = st.session_state.trips
 
-    st.title("Itinerario Detallado")
+    st.title("Itinerario detallado")
 
     # ─── Selector de viaje ───
     active_statuses = [TripStatus.PLANNING.value, TripStatus.CONFIRMED.value, TripStatus.IN_PROGRESS.value]
@@ -22,7 +22,7 @@ try:
 
     if not available_trips:
         st.info("No hay viajes activos. Ve a **Mis Viajes** para crear uno.")
-        if st.button("Ir a Mis Viajes", type="primary"):
+        if st.button("Ir a Mis Viajes", type="primary", help="Navegar a la pagina de gestion de viajes"):
             st.switch_page("pages/7_Mis_Viajes.py")
         st.stop()
 
@@ -48,7 +48,7 @@ try:
 
     if not trip:
         st.info("No hay viaje activo. Ve a **Mis Viajes** para seleccionar o crear uno.")
-        if st.button("Ir a Mis Viajes", type="primary"):
+        if st.button("Ir a Mis Viajes", type="primary", help="Navegar a la pagina de gestion de viajes"):
             st.switch_page("pages/7_Mis_Viajes.py")
         st.stop()
 
@@ -58,10 +58,10 @@ try:
 
     if not items:
         st.warning(
-            "No hay items planificados. Interactúa con el agente en el **Chat** "
+            "No hay items planificados. Interactua con el agente en el **Chat** "
             "para comenzar a construir tu itinerario."
         )
-        if st.button("💬 Abrir Chat"):
+        if st.button("Abrir Chat", help="Ir al chat para agregar actividades al itinerario"):
             st.switch_page("pages/2_Chat.py")
         st.stop()
 
@@ -73,10 +73,15 @@ try:
 
     # ─── Leyenda de estados ───
     st.markdown(
-        "✅ Confirmado &nbsp;&nbsp; ⏳ Pendiente &nbsp;&nbsp; "
-        "💡 Sugerido (no incluido en el plan)"
+        '<div style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem;">'
+        '<span class="tp-status-badge tp-status-badge--confirmed">Confirmado</span>'
+        '<span class="tp-status-badge tp-status-badge--planning">Pendiente</span>'
+        '<span class="tp-status-badge" style="background-color: var(--tp-accent-orange-subtle); '
+        'color: var(--tp-accent-orange);">Sugerido (no incluido en el plan)</span>'
+        '</div>',
+        unsafe_allow_html=True,
     )
-    st.markdown("---")
+    st.divider()
 
     # ─── Tabs por día ───
     day_labels = []
@@ -119,5 +124,5 @@ try:
 
 except Exception as e:
     st.error(f"Error al cargar el itinerario: {e}")
-    if st.button("🔄 Reintentar"):
+    if st.button("Reintentar", help="Recargar la pagina del itinerario"):
         st.rerun()

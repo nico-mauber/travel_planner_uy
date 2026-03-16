@@ -15,42 +15,44 @@ from components.trip_card import render_trip_card
 
 
 def _render_feedback_section(trip: dict, idx: int, user_id: str = None) -> None:
-    """Renderiza la sección de feedback para un viaje completado."""
-    with st.expander(f"📝 Dar feedback — {trip['name']}", expanded=False):
+    """Renderiza la seccion de feedback para un viaje completado."""
+    with st.expander(f"Dar feedback — {trip['name']}", expanded=False):
         with st.form(f"feedback_form_{trip['id']}_{idx}"):
             overall_rating = st.slider(
-                "Valoración general",
+                f"Valoracion general del viaje (1 = malo, 5 = excelente)",
                 min_value=1, max_value=5, value=3,
                 key=f"rating_{trip['id']}_{idx}",
+                help="Califica tu experiencia general en este viaje",
             )
             comment = st.text_area(
-                "Comentarios",
-                placeholder="¿Cómo fue tu experiencia?",
+                "Comentarios generales",
+                placeholder="Cuenta como fue tu experiencia...",
                 key=f"comment_{trip['id']}_{idx}",
+                help="Comparte detalles sobre tu experiencia en este viaje",
             )
 
             # Feedback por item
             item_feedbacks = []
             items = trip.get("items", [])
             if items:
-                st.markdown("**Valoración por actividad:**")
+                st.subheader("Valoracion por actividad")
                 for item in items[:10]:  # Limitar a 10 items
-                    item_cols = st.columns([0.6, 0.2, 0.2])
+                    # Layout responsivo: cada item en su propio bloque
+                    st.markdown(f"**{item['name']}**")
+                    item_cols = st.columns([0.5, 0.5])
                     with item_cols[0]:
-                        st.caption(item["name"])
-                    with item_cols[1]:
                         item_rating = st.slider(
-                            "Rating",
+                            f"Rating de {item['name']}",
                             1, 5, 3,
                             key=f"item_rating_{item['id']}_{idx}",
-                            label_visibility="collapsed",
+                            help=f"Califica tu experiencia con {item['name']}",
                         )
-                    with item_cols[2]:
+                    with item_cols[1]:
                         item_comment = st.text_input(
-                            "Nota",
+                            f"Nota sobre {item['name']}",
                             key=f"item_comment_{item['id']}_{idx}",
-                            label_visibility="collapsed",
-                            placeholder="Nota...",
+                            placeholder="Comentario breve...",
+                            help=f"Agrega un comentario sobre {item['name']}",
                         )
                     item_feedbacks.append({
                         "item_id": item["id"],
@@ -61,9 +63,15 @@ def _render_feedback_section(trip: dict, idx: int, user_id: str = None) -> None:
 
             fc1, fc2 = st.columns(2)
             with fc1:
-                submit_fb = st.form_submit_button("📤 Enviar feedback", type="primary")
+                submit_fb = st.form_submit_button(
+                    "Enviar feedback", type="primary",
+                    help="Guardar tu retroalimentacion sobre este viaje",
+                )
             with fc2:
-                skip_fb = st.form_submit_button("⏭️ Omitir")
+                skip_fb = st.form_submit_button(
+                    "Omitir",
+                    help="No dar feedback por ahora — podras hacerlo mas tarde",
+                )
 
             if submit_fb:
                 feedback_data = {
@@ -95,7 +103,7 @@ try:
     user_id = get_current_user_id()
 
     st.title("Mis Viajes")
-    st.markdown("---")
+    st.divider()
 
     # ─── Barra superior: filtro + nuevo viaje ───
     top_cols = st.columns([0.6, 0.4])
@@ -105,35 +113,57 @@ try:
             TRIP_STATUS_LABELS[s] for s in TripStatus
         ]
         status_filter = st.selectbox(
-            "Filtrar por estado",
+            "Filtrar viajes por estado",
             options=filter_options,
-            label_visibility="collapsed",
+            help="Filtra la lista para mostrar solo viajes con un estado especifico",
         )
 
     with top_cols[1]:
-        if st.button("➕ Nuevo viaje", type="primary", use_container_width=True):
+        if st.button("Nuevo viaje", type="primary", use_container_width=True, help="Abrir formulario para crear un viaje nuevo"):
             st.session_state._show_new_trip_form = True
 
     # ─── Formulario nuevo viaje ───
     if st.session_state.get("_show_new_trip_form", False):
         with st.container(border=True):
-            st.subheader("Crear nuevo viaje")
+            st.header("Crear nuevo viaje")
             with st.form("new_trip_form"):
-                nt_name = st.text_input("Nombre del viaje", placeholder="Ej: Vacaciones en Roma")
-                nt_dest = st.text_input("Destino", placeholder="Ej: Roma, Italia")
+                nt_name = st.text_input(
+                    "Nombre del viaje",
+                    placeholder="Ej: Vacaciones en Roma",
+                    help="Un nombre descriptivo para identificar este viaje",
+                )
+                nt_dest = st.text_input(
+                    "Destino",
+                    placeholder="Ej: Roma, Italia",
+                    help="Ciudad y pais de destino",
+                )
                 nt_col1, nt_col2 = st.columns(2)
                 with nt_col1:
-                    nt_start = st.date_input("Fecha inicio", value=date.today() + timedelta(days=30))
+                    nt_start = st.date_input(
+                        "Fecha de inicio",
+                        value=date.today() + timedelta(days=30),
+                        help="Primer dia del viaje",
+                    )
                 with nt_col2:
-                    nt_end = st.date_input("Fecha fin", value=date.today() + timedelta(days=37))
+                    nt_end = st.date_input(
+                        "Fecha de fin",
+                        value=date.today() + timedelta(days=37),
+                        help="Ultimo dia del viaje",
+                    )
 
                 col_submit, col_cancel = st.columns(2)
                 with col_submit:
-                    create_btn = st.form_submit_button("✅ Crear", type="primary",
-                                                       use_container_width=True)
+                    create_btn = st.form_submit_button(
+                        "Crear viaje", type="primary",
+                        use_container_width=True,
+                        help="Crear el viaje con los datos ingresados",
+                    )
                 with col_cancel:
-                    cancel_btn = st.form_submit_button("❌ Cancelar",
-                                                       use_container_width=True)
+                    cancel_btn = st.form_submit_button(
+                        "Cancelar",
+                        use_container_width=True,
+                        help="Cerrar el formulario sin crear viaje",
+                    )
 
                 if create_btn:
                     if not nt_name or not nt_dest:
@@ -179,15 +209,15 @@ try:
         )
         st.stop()
 
-    # ─── Confirmación de eliminación ───
+    # ─── Confirmacion de eliminacion ───
     if st.session_state.get("_confirm_delete"):
         trip_id = st.session_state._confirm_delete
         trip_to_del = next((t for t in trips if t["id"] == trip_id), None)
         if trip_to_del:
-            st.warning(f"¿Estás seguro de eliminar el viaje **{trip_to_del['name']}**?")
+            st.warning(f"Estas seguro de eliminar el viaje **{trip_to_del['name']}**? Esta accion no se puede deshacer.")
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("Sí, eliminar", type="primary"):
+                if st.button("Si, eliminar viaje", type="primary", help="Confirmar eliminacion permanente del viaje"):
                     delete_trip(trips, trip_id, user_id=user_id)
                     st.session_state.trips = trips
                     if st.session_state.active_trip_id == trip_id:
@@ -195,7 +225,7 @@ try:
                     st.session_state._confirm_delete = None
                     st.rerun()
             with c2:
-                if st.button("Cancelar"):
+                if st.button("Cancelar eliminacion", help="No eliminar, mantener el viaje"):
                     st.session_state._confirm_delete = None
                     st.rerun()
 
@@ -221,5 +251,5 @@ try:
 
 except Exception as e:
     st.error(f"Error al cargar Mis Viajes: {e}")
-    if st.button("🔄 Reintentar"):
+    if st.button("Reintentar", help="Recargar la pagina de mis viajes"):
         st.rerun()

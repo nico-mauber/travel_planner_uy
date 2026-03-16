@@ -35,23 +35,25 @@ class BudgetCategory(str, Enum):
 
 
 # Colores por tipo de item (calendario y UI)
+# Alineados con design tokens WCAG AAA (config/styles/tokens.py)
 ITEM_TYPE_COLORS = {
-    ItemType.ACTIVITY: "#4CAF50",
-    ItemType.TRANSFER: "#9E9E9E",
-    ItemType.ACCOMMODATION: "#2196F3",
-    ItemType.FOOD: "#FF9800",
-    ItemType.FLIGHT: "#E91E63",
-    ItemType.EXTRA: "#9C27B0",
+    ItemType.ACTIVITY: "#56D364",     # --tp-accent-green
+    ItemType.TRANSFER: "#8B949E",     # --tp-accent-gray
+    ItemType.ACCOMMODATION: "#58A6FF",  # --tp-accent-blue
+    ItemType.FOOD: "#FFA657",         # --tp-accent-orange
+    ItemType.FLIGHT: "#FF7B72",       # --tp-accent-red
+    ItemType.EXTRA: "#BC8CFF",        # --tp-accent-purple
 }
 
-# Colores por categoría de presupuesto
+# Colores por categoria de presupuesto
+# Consistentes con ITEM_TYPE_COLORS para coherencia visual
 BUDGET_CATEGORY_COLORS = {
-    BudgetCategory.FLIGHTS: "#E91E63",
-    BudgetCategory.ACCOMMODATION: "#2196F3",
-    BudgetCategory.ACTIVITIES: "#4CAF50",
-    BudgetCategory.FOOD: "#FF9800",
-    BudgetCategory.TRANSPORT: "#9E9E9E",
-    BudgetCategory.EXTRAS: "#9C27B0",
+    BudgetCategory.FLIGHTS: "#FF7B72",     # --tp-accent-red
+    BudgetCategory.ACCOMMODATION: "#58A6FF",  # --tp-accent-blue
+    BudgetCategory.ACTIVITIES: "#56D364",   # --tp-accent-green
+    BudgetCategory.FOOD: "#FFA657",         # --tp-accent-orange
+    BudgetCategory.TRANSPORT: "#8B949E",    # --tp-accent-gray
+    BudgetCategory.EXTRAS: "#BC8CFF",       # --tp-accent-purple
 }
 
 # Iconos por tipo de item

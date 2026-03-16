@@ -6,30 +6,32 @@ from services.auth_service import get_current_user_id
 
 
 try:
-    st.title("Perfil y Preferencias")
-    st.markdown(
+    st.title("Perfil y preferencias")
+    st.caption(
         "Configura tus preferencias de viaje para que el agente personalice "
         "sus sugerencias."
     )
-    st.markdown("---")
+    st.divider()
 
     user_id = get_current_user_id()
 
     # ─── Info del usuario autenticado (read-only) ───
     current_user = st.session_state.get("current_user")
     if current_user:
-        st.subheader("Cuenta")
+        st.header("Cuenta")
+        user_name = current_user.get("name", "Usuario")
         info_cols = st.columns([0.15, 0.85])
         with info_cols[0]:
             picture = current_user.get("picture", "")
             if picture:
-                st.image(picture, width=60)
+                st.image(picture, width=60, caption=f"Foto de {user_name}")
         with info_cols[1]:
-            st.markdown(f"**{current_user.get('name', '')}**")
+            st.markdown(f"**{user_name}**")
             st.markdown(f"Email: {current_user.get('email', '')}")
-        st.markdown("---")
+        st.divider()
 
     # ─── Preferencias editables ───
+    st.header("Preferencias de viaje")
     profile = st.session_state.get("user_profile", {})
 
     with st.form("profile_form"):
@@ -94,7 +96,11 @@ try:
                 placeholder="Ej: LATAM, Iberia, United...",
             )
 
-        submitted = st.form_submit_button("Guardar preferencias", type="primary")
+        submitted = st.form_submit_button(
+            "Guardar preferencias",
+            type="primary",
+            help="Guardar todos los cambios realizados en tus preferencias de viaje",
+        )
 
         if submitted:
             if daily_budget < 0:
@@ -117,5 +123,5 @@ try:
 
 except Exception as e:
     st.error(f"Error al cargar el perfil: {e}")
-    if st.button("Reintentar"):
+    if st.button("Reintentar", help="Recargar la pagina de perfil"):
         st.rerun()
