@@ -76,6 +76,17 @@ _CREATE_TRIP_LABELS = {
     "end_date": "Fecha fin",
 }
 
+_ADD_ITEM_LABELS = {
+    "name": "Actividad",
+    "day": "Dia",
+    "start_time": "Hora inicio",
+    "end_time": "Hora fin",
+    "item_type": "Tipo",
+    "location": "Ubicacion",
+    "cost_estimated": "Costo estimado",
+    "end_day": "Hasta dia",
+}
+
 
 def render_confirmation(action_data: dict, msg_index: int) -> str:
     """Renderiza una solicitud de confirmación. Retorna 'confirm', 'cancel' o ''."""
@@ -87,9 +98,16 @@ def render_confirmation(action_data: dict, msg_index: int) -> str:
         if details:
             detail_items = []
             for key, val in details.items():
-                if key not in ("action",) and val:
-                    label = _CREATE_TRIP_LABELS.get(key, key) if is_create_trip else key
-                    detail_items.append(f"- **{label}**: {val}")
+                # Omitir campos internos (prefijo _) y valores vacios
+                if key.startswith("_") or key in ("action",) or not val:
+                    continue
+                if is_create_trip:
+                    label = _CREATE_TRIP_LABELS.get(key, key)
+                elif action_data.get("action") == "add_item":
+                    label = _ADD_ITEM_LABELS.get(key, key)
+                else:
+                    label = key
+                detail_items.append(f"- **{label}**: {val}")
             if detail_items:
                 st.markdown("\n".join(detail_items))
 

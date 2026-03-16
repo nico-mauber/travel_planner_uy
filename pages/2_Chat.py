@@ -1,39 +1,28 @@
-"""Chat con el Agente — Multiples conversaciones (REQ-UI-002, REQ-UI-003, REQ-CL-004, REQ-CL-005)."""
+"""Chat con el Agente — Selector obligatorio de viaje + multiples conversaciones
+(REQ-CF-001, REQ-UI-002, REQ-UI-003, REQ-CL-004, REQ-CL-005)."""
 
 import streamlit as st
 from datetime import date, timedelta
 
-from services.trip_service import get_active_trip, get_trip_by_id, create_trip
+from config.settings import TripStatus
+from services.trip_service import get_trip_by_id, create_trip
 from services.agent_service import process_message, apply_confirmed_action, is_llm_active, is_booking_active
 from services.auth_service import get_current_user_id
 from services.chat_service import (
     load_chats, create_chat, get_chat_by_id, delete_chat,
     rename_chat, add_message, persist_chat, auto_generate_title,
+    get_latest_chat_for_trip,
 )
 from components.chat_widget import render_rich_card, render_confirmation, render_hotel_results
 
 
-def _find_trip_by_destination(msg_lower: str, trips: list):
-    """Busca un viaje cuyo destino sea mencionado en el mensaje (longest match)."""
-    best = None
-    best_len = 0
-    for t in trips:
-        dest = (t.get("destination") or "").strip()
-        if not dest:
-            continue
-        for part in [dest] + [p.strip() for p in dest.split(",")]:
-            pl = part.lower()
-            if len(pl) > 2 and pl in msg_lower:
-                if len(pl) > best_len:
-                    best = t
-                    best_len = len(pl)
-    return best
+# Sentinel para opcion "Crear nuevo viaje" en el selector
+_CREAR_NUEVO = "__crear_nuevo__"
+_PLACEHOLDER = "__placeholder__"
 
 
 try:
     trips = st.session_state.trips
-    active_trip_id = st.session_state.get("active_trip_id")
-    trip = get_active_trip(trips, active_trip_id)
     user_id = get_current_user_id()
 
     st.title("Chat con el Agente")
@@ -48,6 +37,89 @@ try:
         mode_parts.append("Booking.com")
     st.caption(f"Asistente IA ({' + '.join(mode_parts)})")
 
+    # ─── Selector obligatorio de viaje (REQ-CF-001) ───
+    active_statuses = [TripStatus.PLANNING.value, TripStatus.CONFIRMED.value, TripStatus.IN_PROGRESS.value]
+    available_trips = [t for t in trips if t["status"] in active_statuses]
+
+    # Construir opciones del selector
+    selector_options = [_PLACEHOLDER]
+    selector_labels = {_PLACEHOLDER: "-- Selecciona un viaje --"}
+    for t in available_trips:
+        selector_options.append(t["id"])
+        selector_labels[t["id"]] = f"{t['name']} — {t['destination']} ({t['status']})"
+    selector_options.append(_CREAR_NUEVO)
+    selector_labels[_CREAR_NUEVO] = "Crear nuevo viaje"
+
+    # Determinar indice inicial basado en session_state
+    saved_selection = st.session_state.get("chat_selected_trip_id")
+    default_index = 0
+    if saved_selection and saved_selection in selector_options:
+        default_index = selector_options.index(saved_selection)
+
+    selected_key = st.selectbox(
+        "Selecciona un viaje para chatear",
+        options=selector_options,
+        format_func=lambda k: selector_labels.get(k, k),
+        index=default_index,
+        key="trip_selector_widget",
+    )
+
+    # Persistir seleccion en session_state (RN-008)
+    if selected_key != _PLACEHOLDER:
+        st.session_state.chat_selected_trip_id = selected_key
+
+    # Determinar viaje seleccionado y estado del chat
+    chat_trip = None
+    chat_enabled = False
+    is_creating_new_trip = False
+
+    if selected_key == _PLACEHOLDER:
+        if not available_trips:
+            st.info("No tienes viajes activos. Selecciona 'Crear nuevo viaje' para comenzar.")
+        else:
+            st.info("Selecciona un viaje del selector para comenzar a chatear.")
+
+    elif selected_key == _CREAR_NUEVO:
+        is_creating_new_trip = True
+        chat_enabled = True
+
+    else:
+        chat_trip = get_trip_by_id(trips, selected_key)
+        if chat_trip:
+            chat_enabled = True
+            st.session_state.active_trip_id = chat_trip["id"]
+        else:
+            st.warning("El viaje seleccionado ya no existe. Selecciona otro.")
+
+    # ─── Cargar/crear chat al cambiar viaje (RN-007) ───
+    if chat_enabled and not is_creating_new_trip and chat_trip:
+        prev_trip = st.session_state.get("_chat_prev_trip_id")
+        if prev_trip != chat_trip["id"]:
+            # Viaje cambio — cargar ultimo chat o crear uno nuevo
+            latest = get_latest_chat_for_trip(user_id, chat_trip["id"])
+            if latest:
+                st.session_state.active_chat_id = latest["chat_id"]
+            else:
+                new_chat = create_chat(
+                    user_id=user_id,
+                    trip_id=chat_trip["id"],
+                    title="Nueva conversacion",
+                )
+                st.session_state.active_chat_id = new_chat["chat_id"]
+            st.session_state._chat_prev_trip_id = chat_trip["id"]
+            st.session_state.user_chats = load_chats(user_id)
+
+    elif chat_enabled and is_creating_new_trip:
+        # Modo creacion: si no hay chat activo, crear uno sin trip_id
+        if not st.session_state.get("active_chat_id"):
+            new_chat = create_chat(
+                user_id=user_id,
+                trip_id=None,
+                title="Nuevo viaje",
+            )
+            st.session_state.active_chat_id = new_chat["chat_id"]
+            st.session_state.user_chats = load_chats(user_id)
+
     # ─── Layout dos columnas ───
     col_list, col_chat = st.columns([0.3, 0.7])
 
@@ -56,15 +128,16 @@ try:
         st.markdown("#### Conversaciones")
 
         # Boton nuevo chat
-        if st.button("Nuevo Chat", use_container_width=True, type="primary"):
-            new_chat = create_chat(
-                user_id=user_id,
-                trip_id=trip["id"] if trip else None,
-                title="Nueva conversacion",
-            )
-            st.session_state.active_chat_id = new_chat["chat_id"]
-            st.session_state.user_chats = load_chats(user_id)
-            st.rerun()
+        if chat_enabled:
+            if st.button("Nuevo Chat", use_container_width=True, type="primary"):
+                new_chat = create_chat(
+                    user_id=user_id,
+                    trip_id=chat_trip["id"] if chat_trip else None,
+                    title="Nueva conversacion",
+                )
+                st.session_state.active_chat_id = new_chat["chat_id"]
+                st.session_state.user_chats = load_chats(user_id)
+                st.rerun()
 
         st.markdown("---")
 
@@ -75,14 +148,21 @@ try:
         user_chats = st.session_state.user_chats
         active_chat_id = st.session_state.get("active_chat_id")
 
-        if not user_chats:
-            st.caption("No tienes conversaciones. Crea una nueva.")
+        # Filtrar chats por viaje seleccionado (si hay uno)
+        if chat_trip:
+            visible_chats = [c for c in user_chats if c.get("trip_id") == chat_trip["id"]]
+        elif is_creating_new_trip:
+            visible_chats = [c for c in user_chats if not c.get("trip_id")]
         else:
-            for chat in user_chats:
+            visible_chats = user_chats
+
+        if not visible_chats:
+            st.caption("No hay conversaciones para este viaje.")
+        else:
+            for chat in visible_chats:
                 chat_id = chat["chat_id"]
                 is_active = chat_id == active_chat_id
 
-                # Contenedor para cada chat
                 with st.container():
                     btn_cols = st.columns([0.75, 0.25])
                     with btn_cols[0]:
@@ -108,7 +188,7 @@ try:
             # Confirmacion de eliminacion de chat
             if st.session_state.get("_confirm_delete_chat"):
                 _del_id = st.session_state._confirm_delete_chat
-                st.warning("¿Eliminar esta conversación?")
+                st.warning("Eliminar esta conversacion?")
                 dc1, dc2 = st.columns(2)
                 with dc1:
                     if st.button("Si, eliminar", key="confirm_del_chat", type="primary"):
@@ -125,6 +205,9 @@ try:
 
     # ─── Columna derecha: chat activo ───
     with col_chat:
+        if not chat_enabled:
+            st.stop()
+
         # Obtener chat activo
         active_chat = None
         if active_chat_id:
@@ -134,17 +217,13 @@ try:
             st.info("Selecciona una conversacion o crea una nueva para comenzar.")
             st.stop()
 
-        # Info del viaje asociado
-        chat_trip = None
-        if active_chat.get("trip_id"):
-            chat_trip = get_trip_by_id(trips, active_chat["trip_id"])
-        if not chat_trip:
-            chat_trip = trip  # Usar viaje activo global como fallback
-
+        # Info del viaje asociado (sin fallback — REQ-CF-001)
         if chat_trip:
             st.caption(f"Viaje activo: **{chat_trip['name']}** — {chat_trip['destination']}")
+        elif is_creating_new_trip:
+            st.caption("Modo creacion de viaje — indica tu destino y fechas")
         else:
-            st.caption("Sin viaje activo — puedes crear uno desde aquí")
+            st.caption("Sin viaje asociado")
 
         st.markdown("---")
 
@@ -153,14 +232,27 @@ try:
 
         # Mensaje de bienvenida si el chat esta vacio
         if not history:
+            if is_creating_new_trip:
+                welcome_text = (
+                    "Vamos a crear un nuevo viaje. "
+                    "Indicame el destino al que te gustaria ir."
+                )
+            elif chat_trip:
+                welcome_text = (
+                    f"Estoy listo para ayudarte con tu viaje a **{chat_trip['destination']}**. "
+                    "Puedo ayudarte a planificar actividades, buscar hoteles, "
+                    "organizar el itinerario y mas."
+                )
+            else:
+                welcome_text = (
+                    "Soy tu asistente de viajes. "
+                    "Puedo ayudarte a planificar viajes, buscar hoteles, "
+                    "organizar actividades y mas."
+                )
             welcome_msg = {
                 "role": "assistant",
                 "type": "text",
-                "content": (
-                    "¡Hola! Soy tu asistente de viajes. "
-                    "Puedo ayudarte a planificar viajes, buscar hoteles, "
-                    "organizar actividades y más. ¿En qué puedo ayudarte?"
-                ),
+                "content": welcome_text,
             }
             add_message(active_chat, welcome_msg)
             persist_chat(active_chat)
@@ -209,20 +301,23 @@ try:
                                 active_chat["trip_id"] = new_trip["id"]
                                 msg["processed"] = True
                                 result_msg = (
-                                    f"✅ Viaje creado: **{new_trip['name']}** a {new_trip['destination']} "
+                                    f"Viaje creado: **{new_trip['name']}** a {new_trip['destination']} "
                                     f"({new_trip['start_date']} — {new_trip['end_date']})"
                                 )
                                 msg["result"] = result_msg
                                 st.session_state.trips = trips
-                                # Limpiar draft de creación
+                                # Limpiar draft de creacion
                                 st.session_state.pop("_trip_creation_draft", None)
+                                # Actualizar selector al nuevo viaje
+                                st.session_state.chat_selected_trip_id = new_trip["id"]
+                                st.session_state._chat_prev_trip_id = new_trip["id"]
                                 add_message(active_chat, {
                                     "role": "assistant",
                                     "type": "text",
                                     "content": (
                                         f"{result_msg}\n\n"
-                                        "El viaje ya está activo. Puedes verlo en **Mis Viajes** "
-                                        "o empezar a planificar aquí mismo."
+                                        "El viaje ya esta activo. Puedes verlo en **Mis Viajes** "
+                                        "o empezar a planificar aqui mismo."
                                     ),
                                 })
                                 persist_chat(active_chat)
@@ -246,12 +341,13 @@ try:
                         elif result == "cancel":
                             msg["processed"] = True
                             msg["result"] = "Cancelado por el usuario"
-                            # Limpiar draft de creación si existía
+                            # Limpiar drafts si existian
                             st.session_state.pop("_trip_creation_draft", None)
+                            st.session_state.pop("_item_creation_draft", None)
                             add_message(active_chat, {
                                 "role": "assistant",
                                 "type": "text",
-                                "content": "Entendido, he cancelado la acción. ¿En qué más puedo ayudarte?",
+                                "content": "Entendido, he cancelado la accion.",
                             })
                             persist_chat(active_chat)
                             st.session_state.user_chats = load_chats(user_id)
@@ -274,29 +370,32 @@ try:
                 active_chat["title"] = new_title
                 rename_chat(active_chat["chat_id"], new_title, user_id=user_id)
 
-            # Detectar contexto de viaje desde el mensaje
-            detected = _find_trip_by_destination(user_input.lower(), trips)
-            if detected and detected["id"] != (chat_trip or {}).get("id"):
-                chat_trip = detected
-                active_chat["trip_id"] = detected["id"]
-                st.session_state.active_trip_id = detected["id"]
-
             with st.spinner("El asistente esta procesando tu solicitud..."):
                 trip_creation_draft = st.session_state.get("_trip_creation_draft")
+                item_creation_draft = st.session_state.get("_item_creation_draft")
                 response = process_message(
                     user_input, chat_trip,
                     user_id=user_id,
                     chat_id=active_chat["chat_id"],
                     trip_creation_draft=trip_creation_draft,
+                    item_creation_draft=item_creation_draft,
                 )
 
-            # Manejar draft de creación de viaje en la respuesta
+            # Manejar draft de creacion de viaje en la respuesta
             if "_trip_creation_draft" in response:
                 draft_value = response.pop("_trip_creation_draft")
                 if draft_value is None:
                     st.session_state.pop("_trip_creation_draft", None)
                 else:
                     st.session_state["_trip_creation_draft"] = draft_value
+
+            # Manejar draft de creacion de item en la respuesta
+            if "_item_creation_draft" in response:
+                draft_value = response.pop("_item_creation_draft")
+                if draft_value is None:
+                    st.session_state.pop("_item_creation_draft", None)
+                else:
+                    st.session_state["_item_creation_draft"] = draft_value
 
             add_message(active_chat, response)
             persist_chat(active_chat)

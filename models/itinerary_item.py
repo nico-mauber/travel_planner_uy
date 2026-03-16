@@ -12,6 +12,7 @@ class ItineraryItem:
     name: str
     item_type: str  # ItemType value
     day: int  # Día del viaje (1-based)
+    end_day: int = None  # Día final (multi-dia), None = dia unico
     start_time: str  # HH:MM
     end_time: str    # HH:MM
     status: str = ItemStatus.PENDING.value
@@ -38,6 +39,7 @@ class ItineraryItem:
             "name": self.name,
             "item_type": self.item_type,
             "day": self.day,
+            "end_day": self.end_day,
             "start_time": self.start_time,
             "end_time": self.end_time,
             "status": self.status,
@@ -58,6 +60,7 @@ class ItineraryItem:
             name=data["name"],
             item_type=data["item_type"],
             day=data["day"],
+            end_day=data.get("end_day"),
             start_time=data["start_time"],
             end_time=data["end_time"],
             status=data.get("status", ItemStatus.PENDING.value),

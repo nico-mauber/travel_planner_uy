@@ -4,14 +4,15 @@ import streamlit as st
 from datetime import date
 
 from config.settings import TripStatus, ItemStatus, TRIP_STATUS_LABELS
-from services.trip_service import get_active_trip
+from services.trip_service import get_active_trip, get_trip_by_id
 from services.budget_service import calculate_budget_summary, calculate_planning_progress
 from services.feedback_service import has_pending_feedback
 from components.alert_banner import get_alerts, render_alerts
 
 try:
     trips = st.session_state.trips
-    trip = get_active_trip(trips, st.session_state.get("active_trip_id"))
+
+    st.title("📊 Dashboard")
 
     # ─── Banner feedback pendiente ───
     if has_pending_feedback(trips):
@@ -20,13 +21,12 @@ try:
             "Ve a **Mis Viajes** para dar tu feedback."
         )
 
-    if not trip:
-        st.title("📊 Dashboard")
-        st.markdown("---")
-        st.markdown(
-            "### ¡Bienvenido a Trip Planner!\n\n"
-            "No tienes un viaje activo. Comienza planificando tu próximo viaje."
-        )
+    # ─── Selector de viaje ───
+    active_statuses = [TripStatus.PLANNING.value, TripStatus.CONFIRMED.value, TripStatus.IN_PROGRESS.value]
+    available_trips = [t for t in trips if t["status"] in active_statuses]
+
+    if not available_trips:
+        st.info("No hay viajes activos. Ve a **Mis Viajes** para crear uno.")
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🌍 Ir a Mis Viajes", type="primary", use_container_width=True):
@@ -36,8 +36,29 @@ try:
                 st.switch_page("pages/2_Chat.py")
         st.stop()
 
+    trip_options = {t["id"]: f"{t['name']} — {t['destination']}" for t in available_trips}
+
+    current_active = st.session_state.get("active_trip_id")
+    default_keys = list(trip_options.keys())
+    default_idx = default_keys.index(current_active) if current_active in default_keys else 0
+
+    selected_trip_id = st.selectbox(
+        "Selecciona un viaje",
+        options=default_keys,
+        format_func=lambda k: trip_options[k],
+        index=default_idx,
+        key="dashboard_trip_selector",
+    )
+
+    st.session_state.active_trip_id = selected_trip_id
+    trip = get_trip_by_id(trips, selected_trip_id)
+
+    if not trip:
+        st.warning("No se pudo cargar el viaje seleccionado.")
+        st.stop()
+
     # ─── Dashboard con viaje activo ───
-    st.title(f"📊 {trip['name']}")
+    st.subheader(f"{trip['name']}")
     st.caption(f"📍 {trip['destination']} — {trip['start_date']} a {trip['end_date']}")
 
     # ─── Fila 1: Métricas ───

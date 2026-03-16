@@ -3,9 +3,9 @@
 import streamlit as st
 from datetime import date, timedelta
 
-from config.settings import ItemStatus
+from config.settings import ItemStatus, TripStatus
 from services.trip_service import (
-    get_active_trip, group_items_by_day, accept_suggestion,
+    get_active_trip, get_trip_by_id, group_items_by_day, accept_suggestion,
     discard_suggestion, sync_trip_changes, get_transfer_info,
 )
 from components.itinerary_item import render_itinerary_item, render_transfer
@@ -13,13 +13,42 @@ from components.itinerary_item import render_itinerary_item, render_transfer
 
 try:
     trips = st.session_state.trips
-    trip = get_active_trip(trips, st.session_state.get("active_trip_id"))
 
-    st.title("📋 Itinerario Detallado")
+    st.title("Itinerario Detallado")
+
+    # ─── Selector de viaje ───
+    active_statuses = [TripStatus.PLANNING.value, TripStatus.CONFIRMED.value, TripStatus.IN_PROGRESS.value]
+    available_trips = [t for t in trips if t["status"] in active_statuses]
+
+    if not available_trips:
+        st.info("No hay viajes activos. Ve a **Mis Viajes** para crear uno.")
+        if st.button("Ir a Mis Viajes", type="primary"):
+            st.switch_page("pages/7_Mis_Viajes.py")
+        st.stop()
+
+    # Construir opciones
+    trip_options = {t["id"]: f"{t['name']} — {t['destination']} ({t['start_date']} a {t['end_date']})" for t in available_trips}
+
+    # Determinar seleccion actual
+    current_active = st.session_state.get("active_trip_id")
+    default_keys = list(trip_options.keys())
+    default_idx = default_keys.index(current_active) if current_active in default_keys else 0
+
+    selected_trip_id = st.selectbox(
+        "Selecciona un viaje",
+        options=default_keys,
+        format_func=lambda k: trip_options[k],
+        index=default_idx,
+        key="itinerary_trip_selector",
+    )
+
+    # Actualizar active_trip_id
+    st.session_state.active_trip_id = selected_trip_id
+    trip = get_trip_by_id(trips, selected_trip_id)
 
     if not trip:
         st.info("No hay viaje activo. Ve a **Mis Viajes** para seleccionar o crear uno.")
-        if st.button("🌍 Ir a Mis Viajes", type="primary"):
+        if st.button("Ir a Mis Viajes", type="primary"):
             st.switch_page("pages/7_Mis_Viajes.py")
         st.stop()
 

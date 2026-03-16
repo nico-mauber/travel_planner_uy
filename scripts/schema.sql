@@ -62,6 +62,7 @@ CREATE TABLE public.itinerary_items (
   name TEXT NOT NULL,
   item_type item_type NOT NULL DEFAULT 'actividad',
   day INTEGER NOT NULL CHECK (day >= 1),
+  end_day INTEGER NULL CHECK (end_day IS NULL OR end_day >= day),
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
   status item_status NOT NULL DEFAULT 'pendiente',

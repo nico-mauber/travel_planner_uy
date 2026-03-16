@@ -9,4 +9,4 @@ data/profiles.json
 venv/
 __pycache__/
 *.pyc
-=2.0.0
+=*

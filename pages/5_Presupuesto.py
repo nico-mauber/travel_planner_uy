@@ -4,23 +4,47 @@ import streamlit as st
 
 from config.settings import (
     BudgetCategory, BUDGET_CATEGORY_LABELS, BUDGET_CATEGORY_COLORS,
-    ITEM_TYPE_ICONS, ItemType,
+    ITEM_TYPE_ICONS, ItemType, TripStatus,
 )
-from services.trip_service import get_active_trip
+from services.trip_service import get_active_trip, get_trip_by_id
 from services.budget_service import calculate_budget_summary, has_real_costs
 from components.budget_charts import render_donut_chart, render_comparison_bars
 
 
 try:
     trips = st.session_state.trips
-    trip = get_active_trip(trips, st.session_state.get("active_trip_id"))
 
     st.title("💰 Presupuesto")
 
-    if not trip:
-        st.info("No hay viaje activo. Ve a **Mis Viajes** para seleccionar o crear uno.")
+    # ─── Selector de viaje ───
+    active_statuses = [TripStatus.PLANNING.value, TripStatus.CONFIRMED.value, TripStatus.IN_PROGRESS.value]
+    available_trips = [t for t in trips if t["status"] in active_statuses]
+
+    if not available_trips:
+        st.info("No hay viajes activos. Ve a **Mis Viajes** para crear uno.")
         if st.button("🌍 Ir a Mis Viajes", type="primary"):
             st.switch_page("pages/7_Mis_Viajes.py")
+        st.stop()
+
+    trip_options = {t["id"]: f"{t['name']} — {t['destination']}" for t in available_trips}
+
+    current_active = st.session_state.get("active_trip_id")
+    default_keys = list(trip_options.keys())
+    default_idx = default_keys.index(current_active) if current_active in default_keys else 0
+
+    selected_trip_id = st.selectbox(
+        "Selecciona un viaje",
+        options=default_keys,
+        format_func=lambda k: trip_options[k],
+        index=default_idx,
+        key="budget_trip_selector",
+    )
+
+    st.session_state.active_trip_id = selected_trip_id
+    trip = get_trip_by_id(trips, selected_trip_id)
+
+    if not trip:
+        st.warning("No se pudo cargar el viaje seleccionado.")
         st.stop()
 
     st.caption(f"**{trip['name']}** — {trip['destination']}")

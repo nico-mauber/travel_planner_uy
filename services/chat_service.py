@@ -64,6 +64,27 @@ def get_chat_by_id(chats: list, chat_id: str) -> Optional[dict]:
     return None
 
 
+def get_latest_chat_for_trip(user_id: str, trip_id: str) -> Optional[dict]:
+    """Obtiene el chat mas reciente para un viaje especifico."""
+    from services.supabase_client import get_supabase_client
+
+    sb = get_supabase_client()
+    result = sb.table("chats").select("*").eq("user_id", user_id).eq(
+        "trip_id", trip_id
+    ).order("last_activity_at", desc=True).limit(1).execute()
+
+    if not result.data:
+        return None
+
+    chat = _row_to_chat(result.data[0])
+    # Cargar mensajes
+    msgs_result = sb.table("chat_messages").select("*").eq(
+        "chat_id", chat["chat_id"]
+    ).order("sort_order").execute()
+    chat["messages"] = [_row_to_message(m) for m in (msgs_result.data or [])]
+    return chat
+
+
 def delete_chat(chat_id: str, user_id: str = None) -> bool:
     """Elimina un chat por ID. CASCADE elimina mensajes.
 

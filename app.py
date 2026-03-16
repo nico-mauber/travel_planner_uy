@@ -2,8 +2,6 @@
 
 import html
 import logging
-import os
-import sys
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
@@ -135,6 +133,20 @@ if "dismissed_alerts" not in st.session_state:
 if "user_profile" not in st.session_state:
     from services.profile_service import load_profile
     st.session_state.user_profile = load_profile(user_id=current_user_id)
+
+# ─── Sincronizar active_trip_id desde el selector del Chat (REQ-CF-001) ───
+# El selector del Chat es la fuente de verdad para el viaje activo.
+# Sin esto, al navegar a otra página, active_trip_id puede caer al fallback
+# (primer viaje en planificación) en vez de usar el viaje seleccionado.
+_chat_sel = st.session_state.get("chat_selected_trip_id")
+if _chat_sel and _chat_sel not in ("__placeholder__", "__crear_nuevo__"):
+    # Validar que el trip_id siga existiendo en la lista de viajes
+    if any(t["id"] == _chat_sel for t in st.session_state.trips):
+        st.session_state.active_trip_id = _chat_sel
+    else:
+        # Trip eliminado o inexistente — limpiar referencia obsoleta
+        st.session_state.pop("chat_selected_trip_id", None)
+        st.session_state.active_trip_id = None
 
 # ─── Actualizar estados por fecha (persiste automaticamente en Supabase) ───
 update_trip_statuses(st.session_state.trips)

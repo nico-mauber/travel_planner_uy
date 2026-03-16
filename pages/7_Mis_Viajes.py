@@ -212,6 +212,7 @@ try:
 
         if result.get("action") == "view":
             st.session_state.active_trip_id = result["trip_id"]
+            st.session_state.chat_selected_trip_id = result["trip_id"]
             st.switch_page("pages/1_Dashboard.py")
 
         elif result.get("action") == "delete":

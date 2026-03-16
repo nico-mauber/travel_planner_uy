@@ -17,6 +17,7 @@ def _row_to_item(row: dict) -> dict:
         "name": row.get("name", ""),
         "item_type": row.get("item_type", "actividad"),
         "day": int(row.get("day", 1)),
+        "end_day": row.get("end_day"),
         "start_time": str(row.get("start_time", "00:00"))[:5],  # TIME → "HH:MM"
         "end_time": str(row.get("end_time", "00:00"))[:5],
         "status": row.get("status", "pendiente"),
@@ -58,6 +59,7 @@ def _item_to_row(item: dict) -> dict:
         "name": item.get("name", ""),
         "item_type": item.get("item_type", "actividad"),
         "day": int(item.get("day", 1)),
+        "end_day": item.get("end_day"),
         "start_time": item.get("start_time", "00:00"),
         "end_time": item.get("end_time", "00:00"),
         "status": item.get("status", "pendiente"),
@@ -268,13 +270,18 @@ def filter_trips_by_status(trips: list, status: Optional[str] = None) -> list:
 
 
 def group_items_by_day(items: list) -> dict:
-    """Agrupa items por día y los ordena cronológicamente."""
+    """Agrupa items por dia y los ordena cronologicamente.
+
+    Items con end_day aparecen en todos los dias que abarcan.
+    """
     groups = {}
     for item in items:
-        day = item["day"]
-        if day not in groups:
-            groups[day] = []
-        groups[day].append(item)
+        start_day = item["day"]
+        end_day = item.get("end_day") or start_day
+        for d in range(start_day, end_day + 1):
+            if d not in groups:
+                groups[d] = []
+            groups[d].append(item)
 
     for day in groups:
         groups[day].sort(key=lambda x: x["start_time"])

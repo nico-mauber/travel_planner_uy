@@ -8,8 +8,27 @@ Trip Planner — MVP de un agente de planificación de viajes con interfaz Strea
 
 ## Comandos
 
+### Setup inicial (crear y activar entorno virtual)
+
 ```bash
-pip install -r requirements.txt        # Instalar dependencias
+# Crear el entorno virtual (solo la primera vez)
+python -m venv venv
+
+# Activar el entorno virtual
+# Windows (PowerShell):
+.\venv\Scripts\Activate.ps1
+# Windows (CMD):
+.\venv\Scripts\activate.bat
+# Linux/macOS:
+source venv/bin/activate
+
+# Instalar dependencias
+pip install -r requirements.txt
+```
+
+### Ejecutar la app
+
+```bash
 python -m streamlit run app.py         # Ejecutar la app (localhost:8501)
 .\run.bat                              # Windows: lanza con el venv explícitamente
 python mcp_servers/booking_server.py   # Servidor MCP standalone (stdio)
