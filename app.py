@@ -3,8 +3,27 @@
 import html
 import logging
 
+import os
 from dotenv import load_dotenv
 load_dotenv(override=True)
+
+# ─── Streamlit Cloud: inyectar st.secrets en os.environ ───
+# En Cloud no hay .env; los secrets se configuran en el dashboard.
+# Los servicios leen de os.environ, asi que inyectamos aqui.
+try:
+    import streamlit as _st_init
+    _ENV_KEYS = [
+        "SUPABASE_URL", "SUPABASE_SERVICE_KEY",
+        "OPENAI_API_KEY", "OPENAI_PROJECT",
+        "RAPIDAPI_KEY", "RAPIDAPI_BOOKING_HOST",
+    ]
+    for _k in _ENV_KEYS:
+        if _k not in os.environ:
+            _v = _st_init.secrets.get(_k, "")
+            if _v:
+                os.environ[_k] = _v
+except Exception:
+    pass
 
 # Logging para ver actividad del LLM en consola
 logging.basicConfig(
