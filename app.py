@@ -52,11 +52,7 @@ st.set_page_config(
 # ─── CSS del design system ───
 st.markdown(f"<style>{get_global_css()}</style>", unsafe_allow_html=True)
 
-# ─── Skip link para accesibilidad por teclado ───
-st.markdown(
-    '<a href="#main-content" class="tp-skip-link">Saltar al contenido principal</a>',
-    unsafe_allow_html=True,
-)
+
 
 # ─── Verificar conexión Supabase ───
 from services.supabase_client import is_supabase_available

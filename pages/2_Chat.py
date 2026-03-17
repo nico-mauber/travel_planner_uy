@@ -21,6 +21,15 @@ _CREAR_NUEVO = "__crear_nuevo__"
 _PLACEHOLDER = "__placeholder__"
 
 
+def _clear_drafts():
+    """Limpia drafts de creacion de viaje e item del session_state.
+
+    Evita que un draft persista al cambiar de chat, eliminar chat o cambiar viaje.
+    """
+    st.session_state.pop("_trip_creation_draft", None)
+    st.session_state.pop("_item_creation_draft", None)
+
+
 try:
     trips = st.session_state.trips
     user_id = get_current_user_id()
@@ -94,7 +103,8 @@ try:
     if chat_enabled and not is_creating_new_trip and chat_trip:
         prev_trip = st.session_state.get("_chat_prev_trip_id")
         if prev_trip != chat_trip["id"]:
-            # Viaje cambio — cargar ultimo chat o crear uno nuevo
+            # Viaje cambio — limpiar drafts y cargar ultimo chat o crear uno nuevo
+            _clear_drafts()
             latest = get_latest_chat_for_trip(user_id, chat_trip["id"])
             if latest:
                 st.session_state.active_chat_id = latest["chat_id"]
@@ -173,6 +183,7 @@ try:
                             key=f"select_{chat_id}",
                             use_container_width=True,
                         ):
+                            _clear_drafts()
                             st.session_state.active_chat_id = chat_id
                             st.rerun()
                     with btn_cols[1]:
@@ -193,6 +204,7 @@ try:
                     if st.button("Si, eliminar conversacion", key="confirm_del_chat", type="primary", help="Confirmar eliminacion permanente"):
                         delete_chat(_del_id, user_id=user_id)
                         if active_chat_id == _del_id:
+                            _clear_drafts()
                             st.session_state.active_chat_id = None
                         st.session_state._confirm_delete_chat = None
                         st.session_state.user_chats = load_chats(user_id)
@@ -354,6 +366,10 @@ try:
 
         # ─── Input del usuario ───
         if user_input := st.chat_input("Escribe tu mensaje al asistente de viajes..."):
+            # Capturar historial ANTES de agregar el mensaje actual
+            # (el mensaje actual se pasa por separado como 'message' a process_message)
+            chat_history = active_chat.get("messages", [])
+
             # Agregar mensaje del usuario
             user_msg = {
                 "role": "user",
@@ -378,6 +394,7 @@ try:
                     chat_id=active_chat["chat_id"],
                     trip_creation_draft=trip_creation_draft,
                     item_creation_draft=item_creation_draft,
+                    chat_history=chat_history,
                 )
 
             # Manejar draft de creacion de viaje en la respuesta

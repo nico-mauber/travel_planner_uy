@@ -25,6 +25,7 @@ class ItemExtractionResult(BaseModel):
     intent: str = Field(
         description=(
             "Intencion detectada: 'add_item' (agregar actividad/item al itinerario), "
+            "'create_trip' (crear un viaje NUEVO a un destino — sin datos de dia/hora concretos), "
             "'calendar_event' (agregar viaje completo al cronograma/calendario), "
             "'remove_item' (eliminar item existente), "
             "'hotel_search' (buscar hoteles/hospedaje — NO es agregar item tipo alojamiento), "
@@ -72,6 +73,37 @@ class ItemExtractionResult(BaseModel):
         default=None,
         description="Pregunta al usuario para obtener datos faltantes (en español, natural)",
     )
+    # ─── Campos para intent remove_item ───
+    remove_item_ids: List[str] = Field(
+        default_factory=list,
+        description=(
+            "IDs de items a eliminar (solo para intent 'remove_item'). "
+            "Usa los IDs exactos del listado de ITEMS EXISTENTES."
+        ),
+    )
+    remove_all: bool = Field(
+        default=False,
+        description=(
+            "True si el usuario quiere eliminar TODOS los items del itinerario "
+            "(solo para intent 'remove_item')"
+        ),
+    )
+    remove_summary: Optional[str] = Field(
+        default=None,
+        description=(
+            "Resumen legible de lo que se va a eliminar, en español. "
+            "Ej: 'Todas las actividades del dia 2', 'La cena del dia 3'. "
+            "(solo para intent 'remove_item')"
+        ),
+    )
+    # ─── Campo para intent create_trip ───
+    trip_destination: Optional[str] = Field(
+        default=None,
+        description=(
+            "Destino del nuevo viaje (solo para intent 'create_trip'). "
+            "Ej: 'Japon', 'Roma', 'Cancun'"
+        ),
+    )
 
 
 # ─── Singleton ChatOpenAI para extraccion ───
@@ -107,11 +139,29 @@ INSTRUCCIONES:
 
 1. DETECTA LA INTENCION del mensaje analizando el significado semantico (NO busques keywords especificas — entiende la intencion del usuario sin importar el idioma o las palabras exactas que use):
    - "add_item": el usuario quiere agregar una actividad, comida, vuelo, traslado u otro item concreto al itinerario (tiene o puede completar datos como nombre, dia, hora)
+   - "create_trip": el usuario quiere crear un VIAJE NUEVO a un destino. Habla de un destino/lugar sin datos concretos de itinerario (sin dia, sin hora). Ej: "quiero ir a Japon", "planifiquemos un viaje a Roma"
    - "calendar_event": el usuario quiere agregar el viaje completo como bloque al cronograma o calendario (no un item individual, sino el viaje entero como evento)
-   - "remove_item": el usuario quiere eliminar o quitar un item existente del itinerario
+   - "remove_item": el usuario quiere eliminar o quitar uno, varios o TODOS los items existentes del itinerario. Analiza cuales items matchean con lo que pide el usuario
    - "hotel_search": el usuario quiere explorar opciones de hospedaje — buscar hoteles, ver donde dormir. Esto NO es agregar un item tipo alojamiento con datos concretos
    - "informative": el usuario hace una pregunta informativa o conversacional, NO quiere modificar el itinerario
    - "unknown": no se puede determinar la intencion
+
+REGLA DE PRIORIDAD (aplicar ANTES de cualquier otra):
+- Si el mensaje contiene CUALQUIER indicador temporal concreto (dia, hora, "primer dia", "manana", "por la tarde", "a las 7am", etc.) junto con una actividad o lugar → SIEMPRE es add_item, sin importar que empiece con "quiero ir a"
+- Ejemplo: "quiero ir a pasear por la rambla el primer dia a las 7am" → add_item (tiene dia + hora + actividad concreta)
+- Solo es create_trip si habla UNICAMENTE de un destino de viaje (pais/ciudad) sin NINGUN dato temporal
+
+SOBRE REFERENCIAS AL HISTORIAL:
+- Si el usuario referencia algo discutido antes ("agrega lo que te dije", "el paseo que mencionamos"), revisa los mensajes previos del historial para recuperar nombre, dia, hora y otros datos
+- Los datos mencionados en mensajes anteriores son validos para extraer
+
+IMPORTANTE sobre create_trip vs add_item:
+- Si el mensaje contiene indicadores de dia/hora/posicion en itinerario → add_item (es un item concreto para el viaje actual)
+- "agrega viaje a Cristo Redentor el dia 1 a las 7am" → add_item (tiene dia y hora, es un item del itinerario)
+- "quiero ir a Japon" → create_trip (habla de destino sin datos de itinerario)
+- "planifiquemos vacaciones en Cancun" → create_trip
+- Si habla de destino sin datos de itinerario → create_trip
+- Si hay un viaje activo y el mensaje parece referirse a una actividad del viaje actual → add_item
 
 IMPORTANTE sobre hotel_search vs add_item:
 - Quiere explorar opciones de hospedaje sin datos concretos → hotel_search
@@ -140,7 +190,16 @@ IMPORTANTE sobre hotel_search vs add_item:
    - location: lugar especifico si se menciona (ej: "en el centro", "en la Torre Eiffel")
    - cost: costo en USD si se menciona (busca "$", "dolares", "usd", "cuesta", "por X dolares")
 
-3. EVALUA COMPLETITUD:
+3. Si la intencion es "remove_item", IDENTIFICA los items a eliminar:
+   - Revisa la lista de ITEMS EXISTENTES con sus IDs entre corchetes [item-XXXXXXXX]
+   - remove_item_ids: lista de IDs exactos de los items que el usuario quiere eliminar
+   - remove_all: True SOLO si el usuario explicitamente quiere eliminar TODOS los items (ej: "elimina todo", "borra todos los items", "limpia el itinerario")
+   - remove_summary: descripcion legible de lo que se eliminara (ej: "Cena en restaurante italiano del dia 2", "Todos los items del dia 3", "Todos los items del itinerario")
+   - Si remove_all es True, pon TODOS los IDs de items existentes en remove_item_ids
+   - Interpreta semanticamente: "elimina las comidas" → todos los items tipo comida. "elimina todo del dia 2" → todos los items del dia 2. "elimina la cena" → el item de comida que sea una cena
+   - Si NO encuentras items que coincidan con lo que pide el usuario, deja remove_item_ids vacio y pon en remove_summary una explicacion (ej: "No se encontraron items que coincidan")
+
+4. EVALUA COMPLETITUD:
    - is_complete = True si tienes al menos name Y day
    - missing_fields: lista de campos faltantes entre "name" y "day"
    - follow_up_question: pregunta natural en español para pedir lo que falta. Ejemplos:
@@ -163,19 +222,24 @@ REGLAS CRITICAS:
 # ─── Helpers de formato ───
 
 def _format_existing_items(trip: dict) -> str:
-    """Formatea los items existentes del viaje para contexto del LLM."""
+    """Formatea los items existentes del viaje para contexto del LLM.
+
+    Incluye el ID de cada item para que el LLM pueda referenciarlos
+    en operaciones de eliminacion (remove_item_ids).
+    """
     items = trip.get("items", [])
     if not items:
         return "ITEMS EXISTENTES: ninguno"
 
-    lines = ["ITEMS EXISTENTES:"]
+    lines = ["ITEMS EXISTENTES (formato: [ID] Nombre (tipo) | Dia | Horario):"]
     for item in items:
+        item_id = item.get("id", "?")
         end_day = item.get("end_day")
         day_str = f"Dia {item.get('day', '?')}"
         if end_day and end_day > item.get("day", 0):
             day_str = f"Dias {item.get('day')}-{end_day}"
         lines.append(
-            f"- {item.get('name', '?')} ({item.get('item_type', '?')}) | "
+            f"- [{item_id}] {item.get('name', '?')} ({item.get('item_type', '?')}) | "
             f"{day_str} | {item.get('start_time', '?')}-{item.get('end_time', '?')}"
         )
     return "\n".join(lines)
@@ -229,7 +293,7 @@ def _calculate_total_days(trip: dict) -> int:
 # ─── Post-validacion defensiva ───
 
 _TIME_FORMAT = re.compile(r"^\d{2}:\d{2}$")
-_VALID_INTENTS = {"add_item", "calendar_event", "remove_item", "hotel_search", "informative", "unknown"}
+_VALID_INTENTS = {"add_item", "create_trip", "calendar_event", "remove_item", "hotel_search", "informative", "unknown"}
 _VALID_ITEM_TYPES = {"actividad", "comida", "vuelo", "traslado", "alojamiento", "extra"}
 
 
@@ -273,6 +337,26 @@ def _post_validate(
     if result.cost is not None and result.cost < 0:
         result.cost = None
 
+    # Validar campos de remove_item
+    if result.intent == "remove_item":
+        existing_ids = {item.get("id") for item in trip.get("items", [])}
+        # Filtrar IDs que no existen en el viaje
+        result.remove_item_ids = [
+            rid for rid in result.remove_item_ids if rid in existing_ids
+        ]
+        # Si remove_all, asegurar que incluya todos los IDs
+        if result.remove_all and existing_ids:
+            result.remove_item_ids = list(existing_ids)
+    else:
+        # Limpiar campos de remove si el intent no es remove_item
+        result.remove_item_ids = []
+        result.remove_all = False
+        result.remove_summary = None
+
+    # Limpiar trip_destination si el intent no es create_trip
+    if result.intent != "create_trip":
+        result.trip_destination = None
+
     # Merge con draft existente (el LLM puede no repetir datos del draft)
     if draft:
         if not result.name and draft.get("name"):
@@ -305,12 +389,32 @@ def _post_validate(
     return result
 
 
+# ─── Helper para formatear historial de chat ───
+
+def _format_chat_history(messages: Optional[list], max_messages: int = 6) -> list:
+    """Formatea mensajes recientes del chat como historial para el LLM.
+
+    Solo incluye mensajes type=="text" con content string (excluye cards,
+    confirmaciones, hotel_results cuyos content son dicts).
+    Retorna los ultimos max_messages (~3 pares user/assistant).
+    """
+    if not messages:
+        return []
+    text_msgs = [
+        m for m in messages
+        if m.get("type") == "text" and isinstance(m.get("content"), str)
+    ]
+    recent = text_msgs[-max_messages:]
+    return [{"role": m["role"], "content": m["content"]} for m in recent]
+
+
 # ─── Funcion principal de extraccion ───
 
 def extract_item_with_llm(
     message: str,
     trip: dict,
     partial_draft: Optional[dict] = None,
+    chat_history: Optional[list] = None,
 ) -> Optional[ItemExtractionResult]:
     """Extrae datos de item usando LLM structured output.
 
@@ -318,6 +422,7 @@ def extract_item_with_llm(
         message: Mensaje del usuario
         trip: Dict del viaje activo (con items, fechas, destino)
         partial_draft: Borrador parcial de item (flujo multi-turn)
+        chat_history: Lista de mensajes previos del chat (sin el mensaje actual)
 
     Returns:
         ItemExtractionResult con datos extraidos, o None si hay error.
@@ -338,8 +443,10 @@ def extract_item_with_llm(
             partial_draft_context=_format_partial_draft(partial_draft),
         )
 
+        history_msgs = _format_chat_history(chat_history)
         messages = [
             {"role": "system", "content": system_prompt},
+            *history_msgs,
             {"role": "user", "content": message},
         ]
 
@@ -349,8 +456,10 @@ def extract_item_with_llm(
         result = _post_validate(result, trip, partial_draft)
 
         logger.info(
-            "[llm_extraction] intent=%s, name=%s, day=%s, type=%s, complete=%s",
+            "[llm_extraction] intent=%s, name=%s, day=%s, type=%s, complete=%s, "
+            "remove_ids=%s, remove_all=%s",
             result.intent, result.name, result.day, result.item_type, result.is_complete,
+            result.remove_item_ids, result.remove_all,
         )
 
         return result

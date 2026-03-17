@@ -189,6 +189,9 @@ _ADD_ITEM_LABELS = {
 _REMOVE_ITEM_LABELS = {
     "name": "Actividad",
     "item_id": "ID",
+    "item_name": "Actividad",
+    "item_names": "Items a eliminar",
+    "item_count": "Cantidad",
 }
 
 # Iconos contextuales por tipo de accion
@@ -223,8 +226,8 @@ def render_confirmation(action_data: dict, msg_index: int) -> str:
     if details:
         items_html = ""
         for key, val in details.items():
-            # Omitir campos internos (prefijo _) y valores vacios
-            if key.startswith("_") or key in ("action",) or not val:
+            # Omitir campos internos (prefijo _) y valores vacios/None
+            if key.startswith("_") or key in ("action",) or val is None or val == "":
                 continue
             if is_create_trip:
                 label = _CREATE_TRIP_LABELS.get(key, key)
