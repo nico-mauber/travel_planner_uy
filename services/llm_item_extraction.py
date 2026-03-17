@@ -123,6 +123,13 @@ class ItemExtractionResult(BaseModel):
         default=None,
         description="Monto del gasto en USD (solo para intents de expense)",
     )
+    remove_all_expenses: bool = Field(
+        default=False,
+        description=(
+            "True si el usuario quiere eliminar TODOS los gastos del presupuesto "
+            "(solo para intent 'remove_expense'). Ej: 'elimina todos los gastos', 'borra los gastos del viaje'"
+        ),
+    )
 
 
 # ─── Singleton ChatOpenAI para extraccion ───
@@ -199,6 +206,16 @@ IMPORTANTE sobre add_expense vs add_item:
 - Si tiene indicadores temporales concretos (dia, hora) → add_item
 - Si solo habla de dinero/costo sin posicionarlo en el itinerario → add_expense
 
+IMPORTANTE sobre remove_item vs remove_expense:
+- Si el usuario menciona "gasto", "gastos", "presupuesto", "costo" → remove_expense (quiere eliminar del presupuesto)
+- Si el nombre coincide con un GASTO EXISTENTE (por nombre o categoria) → remove_expense
+- Si el nombre coincide con un ITEM EXISTENTE del itinerario → remove_item
+- "elimina el gasto de comida" → remove_expense
+- "elimina todos los gastos" / "borra los gastos del viaje" → remove_expense con remove_all_expenses=True
+- "elimina la cena del dia 2" → remove_item (es un item del itinerario)
+- "elimina el transporte local" → remove_expense SI hay un gasto con categoria transporte_local o nombre similar en GASTOS EXISTENTES
+- En caso de duda, revisa si lo que pide el usuario existe en GASTOS EXISTENTES o en ITEMS EXISTENTES para decidir
+
 2. Si la intencion es "add_item", EXTRAE estos campos:
    - name: nombre descriptivo de la actividad (limpio, sin datos temporales ni de costo). Ej: "Cena en restaurante italiano", "Tour por el centro historico"
    - day: dia relativo del viaje (1 = primer dia). Convierte referencias a dia relativo:
@@ -241,7 +258,7 @@ IMPORTANTE sobre add_expense vs add_item:
      * seguro/equipaje/compras/souvenir/otro → "extras"
    - Para add_expense: extrae name (nombre DESCRIPTIVO del gasto, NO la categoria — ej: "Pasajes aereos", "Seguro de viaje", "Comida en el aeropuerto". Si el usuario no da un nombre concreto, genera uno descriptivo basado en el contexto) y expense_amount (monto en USD)
    - Para modify_expense: identifica el gasto por expense_id de la lista de GASTOS EXISTENTES. SIEMPRE incluye tambien el name del gasto como fallback. Extrae los campos a cambiar (name, expense_amount, expense_category)
-   - Para remove_expense: identifica el gasto por expense_id de la lista de GASTOS EXISTENTES. SIEMPRE incluye tambien el name del gasto como fallback para identificarlo. Si el usuario dice "el gasto de comida", pon name="Gasto en comida" o similar basandote en los GASTOS EXISTENTES
+   - Para remove_expense: identifica el gasto por expense_id de la lista de GASTOS EXISTENTES. SIEMPRE incluye tambien el name del gasto como fallback para identificarlo. Si el usuario dice "el gasto de comida", pon name="Gasto en comida" o similar basandote en los GASTOS EXISTENTES. Si el usuario quiere eliminar TODOS los gastos ("elimina los gastos", "borra todos los gastos"), pon remove_all_expenses=True
 
 5. EVALUA COMPLETITUD:
    - is_complete = True si tienes al menos name Y day
@@ -411,6 +428,7 @@ def _post_validate(
         result.expense_category = None
         result.expense_id = None
         result.expense_amount = None
+        result.remove_all_expenses = False
 
     # Validar expense_amount no negativo
     if result.expense_amount is not None and result.expense_amount < 0:

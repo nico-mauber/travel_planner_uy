@@ -628,6 +628,22 @@ def _handle_modify_expense(result, trip: dict) -> Optional[dict]:
             if exp.get("category") == result.expense_category:
                 target = exp
                 break
+    if not target and result.name:
+        # Fallback extra: el nombre del usuario puede ser la etiqueta de categoría
+        from config.settings import BudgetCategory, BUDGET_CATEGORY_LABELS
+        _label_to_value = {label.lower(): cat.value for cat, label in BUDGET_CATEGORY_LABELS.items()}
+        name_lower = result.name.lower()
+        matched_cat = _label_to_value.get(name_lower)
+        if not matched_cat:
+            for label, cat_val in _label_to_value.items():
+                if name_lower in label or label in name_lower:
+                    matched_cat = cat_val
+                    break
+        if matched_cat:
+            for exp in expenses:
+                if exp.get("category") == matched_cat:
+                    target = exp
+                    break
 
     if not target:
         return {
@@ -691,6 +707,25 @@ def _handle_remove_expense(result, trip: dict) -> Optional[dict]:
             "content": "No hay gastos registrados en este viaje para eliminar.",
         }
 
+    # Eliminar TODOS los gastos
+    if getattr(result, "remove_all_expenses", False):
+        total = sum(exp["amount"] for exp in expenses)
+        names = ", ".join(exp["name"] for exp in expenses)
+        return {
+            "role": "assistant",
+            "type": "confirmation",
+            "content": {
+                "action": "remove_all_expenses",
+                "summary": f"Eliminar todos los gastos del viaje ({len(expenses)} gastos, USD {total:,.2f})",
+                "details": {
+                    "expense_count": len(expenses),
+                    "expense_names": names,
+                    "total_amount": f"USD {total:,.2f}",
+                    "_expense_ids": [exp["id"] for exp in expenses],
+                },
+            },
+        }
+
     # Buscar expense por ID
     target = None
     if result.expense_id:
@@ -707,12 +742,29 @@ def _handle_remove_expense(result, trip: dict) -> Optional[dict]:
                 target = exp
                 break
 
-    # Fallback: buscar por categoría
+    # Fallback: buscar por categoría (valor enum o etiqueta legible)
     if not target and result.expense_category:
         for exp in expenses:
             if exp.get("category") == result.expense_category:
                 target = exp
                 break
+    if not target and result.name:
+        # Fallback extra: el nombre del usuario puede ser la etiqueta de categoría
+        from config.settings import BudgetCategory, BUDGET_CATEGORY_LABELS
+        _label_to_value = {label.lower(): cat.value for cat, label in BUDGET_CATEGORY_LABELS.items()}
+        name_lower = result.name.lower()
+        matched_cat = _label_to_value.get(name_lower)
+        if not matched_cat:
+            # Substring match: "transporte" matchea "transporte local"
+            for label, cat_val in _label_to_value.items():
+                if name_lower in label or label in name_lower:
+                    matched_cat = cat_val
+                    break
+        if matched_cat:
+            for exp in expenses:
+                if exp.get("category") == matched_cat:
+                    target = exp
+                    break
 
     if not target:
         return {
@@ -1121,6 +1173,19 @@ def apply_confirmed_action(action: dict, trip: dict, trips: list) -> str:
                 sync_trip_changes(trips, trip)
                 return f"Se eliminó el gasto '{removed_name}' del presupuesto."
         return "No se pudo eliminar el gasto."
+
+    elif action_type == "remove_all_expenses":
+        from services.expense_service import remove_expense
+        expense_ids = details.get("_expense_ids", [])
+        removed = []
+        for eid in expense_ids:
+            name = remove_expense(trip, eid)
+            if name:
+                removed.append(name)
+        if removed:
+            sync_trip_changes(trips, trip)
+            return f"Se eliminaron {len(removed)} gastos del presupuesto: {', '.join(removed)}."
+        return "No se pudieron eliminar los gastos."
 
     elif action_type == "create_trip":
         # Esto se maneja de forma especial en el chat
