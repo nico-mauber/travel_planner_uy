@@ -35,7 +35,7 @@ class ItemExtractionResult(BaseModel):
     )
     name: Optional[str] = Field(
         default=None,
-        description="Nombre descriptivo de la actividad/item (limpio, sin datos temporales ni de costo)",
+        description="Nombre descriptivo de la actividad, item o gasto (limpio, sin datos temporales ni de costo). Tambien se usa para identificar gastos en modify_expense y remove_expense.",
     )
     day: Optional[int] = Field(
         default=None,
@@ -104,6 +104,25 @@ class ItemExtractionResult(BaseModel):
             "Ej: 'Japon', 'Roma', 'Cancun'"
         ),
     )
+    # ─── Campos para intents de gastos (expenses) ───
+    expense_category: Optional[str] = Field(
+        default=None,
+        description=(
+            "Categoria del gasto para presupuesto (solo para intents de expense). "
+            "Valores: 'vuelos', 'alojamiento', 'actividades', 'comidas', 'transporte_local', 'extras'"
+        ),
+    )
+    expense_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "ID del gasto a modificar o eliminar (solo para 'modify_expense' y 'remove_expense'). "
+            "Usa los IDs exactos del listado de GASTOS EXISTENTES."
+        ),
+    )
+    expense_amount: Optional[float] = Field(
+        default=None,
+        description="Monto del gasto en USD (solo para intents de expense)",
+    )
 
 
 # ─── Singleton ChatOpenAI para extraccion ───
@@ -133,6 +152,8 @@ CONTEXTO DEL VIAJE:
 
 {existing_items_context}
 
+{existing_expenses_context}
+
 {partial_draft_context}
 
 INSTRUCCIONES:
@@ -143,6 +164,9 @@ INSTRUCCIONES:
    - "calendar_event": el usuario quiere agregar el viaje completo como bloque al cronograma o calendario (no un item individual, sino el viaje entero como evento)
    - "remove_item": el usuario quiere eliminar o quitar uno, varios o TODOS los items existentes del itinerario. Analiza cuales items matchean con lo que pide el usuario
    - "hotel_search": el usuario quiere explorar opciones de hospedaje — buscar hoteles, ver donde dormir. Esto NO es agregar un item tipo alojamiento con datos concretos
+   - "add_expense": el usuario quiere registrar un gasto/costo al presupuesto del viaje que NO es un item del itinerario. Ej: "me compré los pasajes por 500 dólares", "pagué el seguro de viaje", "gasté 200 en souvenirs"
+   - "modify_expense": el usuario quiere cambiar el monto, nombre o categoría de un gasto ya registrado
+   - "remove_expense": el usuario quiere eliminar un gasto registrado del presupuesto
    - "informative": el usuario hace una pregunta informativa o conversacional, NO quiere modificar el itinerario
    - "unknown": no se puede determinar la intencion
 
@@ -166,6 +190,14 @@ IMPORTANTE sobre create_trip vs add_item:
 IMPORTANTE sobre hotel_search vs add_item:
 - Quiere explorar opciones de hospedaje sin datos concretos → hotel_search
 - Quiere agregar un alojamiento especifico con datos concretos (nombre, dia, hora) → add_item
+
+IMPORTANTE sobre add_expense vs add_item:
+- Si el usuario habla de un GASTO o COSTO sin datos de itinerario (dia, hora) → add_expense (es un costo para el presupuesto)
+- "me compré los pasajes por 500 dolares" → add_expense (gasto sin dia/hora concretos)
+- "pagué 200 del hotel" → add_expense
+- "agrega un vuelo el dia 1 a las 8am por 500 dolares" → add_item (tiene dia + hora, es item del itinerario)
+- Si tiene indicadores temporales concretos (dia, hora) → add_item
+- Si solo habla de dinero/costo sin posicionarlo en el itinerario → add_expense
 
 2. Si la intencion es "add_item", EXTRAE estos campos:
    - name: nombre descriptivo de la actividad (limpio, sin datos temporales ni de costo). Ej: "Cena en restaurante italiano", "Tour por el centro historico"
@@ -199,7 +231,19 @@ IMPORTANTE sobre hotel_search vs add_item:
    - Interpreta semanticamente: "elimina las comidas" → todos los items tipo comida. "elimina todo del dia 2" → todos los items del dia 2. "elimina la cena" → el item de comida que sea una cena
    - Si NO encuentras items que coincidan con lo que pide el usuario, deja remove_item_ids vacio y pon en remove_summary una explicacion (ej: "No se encontraron items que coincidan")
 
-4. EVALUA COMPLETITUD:
+4. Si la intencion es "add_expense", "modify_expense" o "remove_expense":
+   - expense_category: infiere la categoria del contexto:
+     * pasajes/vuelos/avion → "vuelos"
+     * hotel/hospedaje/airbnb → "alojamiento"
+     * tour/entrada/actividad/excursion → "actividades"
+     * comida/restaurante/cena → "comidas"
+     * taxi/uber/transporte/bus → "transporte_local"
+     * seguro/equipaje/compras/souvenir/otro → "extras"
+   - Para add_expense: extrae name (nombre DESCRIPTIVO del gasto, NO la categoria — ej: "Pasajes aereos", "Seguro de viaje", "Comida en el aeropuerto". Si el usuario no da un nombre concreto, genera uno descriptivo basado en el contexto) y expense_amount (monto en USD)
+   - Para modify_expense: identifica el gasto por expense_id de la lista de GASTOS EXISTENTES. SIEMPRE incluye tambien el name del gasto como fallback. Extrae los campos a cambiar (name, expense_amount, expense_category)
+   - Para remove_expense: identifica el gasto por expense_id de la lista de GASTOS EXISTENTES. SIEMPRE incluye tambien el name del gasto como fallback para identificarlo. Si el usuario dice "el gasto de comida", pon name="Gasto en comida" o similar basandote en los GASTOS EXISTENTES
+
+5. EVALUA COMPLETITUD:
    - is_complete = True si tienes al menos name Y day
    - missing_fields: lista de campos faltantes entre "name" y "day"
    - follow_up_question: pregunta natural en español para pedir lo que falta. Ejemplos:
@@ -293,7 +337,7 @@ def _calculate_total_days(trip: dict) -> int:
 # ─── Post-validacion defensiva ───
 
 _TIME_FORMAT = re.compile(r"^\d{2}:\d{2}$")
-_VALID_INTENTS = {"add_item", "create_trip", "calendar_event", "remove_item", "hotel_search", "informative", "unknown"}
+_VALID_INTENTS = {"add_item", "create_trip", "calendar_event", "remove_item", "hotel_search", "add_expense", "modify_expense", "remove_expense", "informative", "unknown"}
 _VALID_ITEM_TYPES = {"actividad", "comida", "vuelo", "traslado", "alojamiento", "extra"}
 
 
@@ -356,6 +400,27 @@ def _post_validate(
     # Limpiar trip_destination si el intent no es create_trip
     if result.intent != "create_trip":
         result.trip_destination = None
+
+    # Validar expense_category
+    _VALID_EXPENSE_CATEGORIES = {"vuelos", "alojamiento", "actividades", "comidas", "transporte_local", "extras"}
+    if result.expense_category and result.expense_category not in _VALID_EXPENSE_CATEGORIES:
+        result.expense_category = "extras"
+
+    # Limpiar campos de expense si el intent no es de expense
+    if result.intent not in ("add_expense", "modify_expense", "remove_expense"):
+        result.expense_category = None
+        result.expense_id = None
+        result.expense_amount = None
+
+    # Validar expense_amount no negativo
+    if result.expense_amount is not None and result.expense_amount < 0:
+        result.expense_amount = None
+
+    # Validar expense_id existe (para modify/remove)
+    if result.intent in ("modify_expense", "remove_expense") and result.expense_id:
+        existing_expense_ids = {exp.get("id") for exp in trip.get("expenses", [])}
+        if result.expense_id not in existing_expense_ids:
+            result.expense_id = None
 
     # Merge con draft existente (el LLM puede no repetir datos del draft)
     if draft:
@@ -433,6 +498,12 @@ def extract_item_with_llm(
 
         total_days = _calculate_total_days(trip)
 
+        try:
+            from services.expense_service import format_existing_expenses
+            expenses_context = format_existing_expenses(trip)
+        except ImportError:
+            expenses_context = "GASTOS EXISTENTES: ninguno"
+
         system_prompt = EXTRACTION_SYSTEM_PROMPT.format(
             destination=trip.get("destination", "No definido"),
             start_date=trip.get("start_date", "No definida"),
@@ -440,6 +511,7 @@ def extract_item_with_llm(
             total_days=total_days,
             today=date.today().isoformat(),
             existing_items_context=_format_existing_items(trip),
+            existing_expenses_context=expenses_context,
             partial_draft_context=_format_partial_draft(partial_draft),
         )
 

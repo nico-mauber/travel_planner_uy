@@ -50,15 +50,16 @@ try:
     st.caption(f"**{trip['name']}** — {trip['destination']}")
 
     items = trip.get("items", [])
-    budget = calculate_budget_summary(items)
+    expenses = trip.get("expenses", [])
+    budget = calculate_budget_summary(items, expenses)
 
     # ─── Fila 1: Metrica principal ───
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric(
-            "Presupuesto estimado",
+            "Presupuesto total",
             f"USD {budget['total_estimated']:,.0f}",
-            help="Suma de costos estimados de todos los items confirmados y pendientes",
+            help="Suma de costos estimados de items + gastos directos",
         )
     with col2:
         if budget["total_real"] > 0:
@@ -76,18 +77,26 @@ try:
                 help="Aun no hay gastos reales registrados para este viaje",
             )
     with col3:
-        items_count = sum(
-            len(cat_data["items"]) for cat_data in budget["by_category"].values()
-        )
-        st.metric(
-            "Items contabilizados", items_count,
-            help="Cantidad de items con costo incluidos en el presupuesto (excluye sugeridos)",
-        )
+        total_expenses = budget.get("total_expenses", 0.0)
+        if total_expenses > 0:
+            st.metric(
+                "Gastos directos",
+                f"USD {total_expenses:,.0f}",
+                help="Total de gastos registrados directamente (no items del itinerario)",
+            )
+        else:
+            items_count = sum(
+                len(cat_data["items"]) for cat_data in budget["by_category"].values()
+            )
+            st.metric(
+                "Items contabilizados", items_count,
+                help="Cantidad de items con costo incluidos en el presupuesto (excluye sugeridos)",
+            )
 
     st.divider()
 
-    if not items or budget["total_estimated"] == 0:
-        st.info("No hay items con costos para mostrar el presupuesto.")
+    if (not items and not expenses) or budget["total_estimated"] == 0:
+        st.info("No hay items ni gastos con costos para mostrar el presupuesto.")
         st.stop()
 
     # ─── Fila 2: Donut + Tabla ───
@@ -107,8 +116,8 @@ try:
                 table_data.append({
                     "Categoria": BUDGET_CATEGORY_LABELS[cat],
                     "Estimado (USD)": cat_data["estimated"],
-                    "Real (USD)": cat_data["real"] if cat_data["real"] > 0 else None,
-                    "Diferencia": diff if cat_data["real"] > 0 else None,
+                    "Real (USD)": cat_data["real"] if cat_data["real"] > 0 else float("nan"),
+                    "Diferencia": diff if cat_data["real"] > 0 else float("nan"),
                 })
 
         if table_data:
@@ -158,13 +167,16 @@ try:
     for cat in BudgetCategory:
         cat_data = budget["by_category"][cat.value]
         cat_items = cat_data["items"]
-        if not cat_items:
+        cat_expenses = cat_data.get("expenses", [])
+        if not cat_items and not cat_expenses:
             continue
 
         color = BUDGET_CATEGORY_COLORS[cat]
         n_items = len(cat_items)
+        n_expenses = len(cat_expenses)
+        exp_suffix = f" + {n_expenses} gasto{'s' if n_expenses != 1 else ''}" if n_expenses else ""
         with st.expander(
-            f"{BUDGET_CATEGORY_LABELS[cat]} — USD {cat_data['estimated']:,.0f} estimado ({n_items} item{'s' if n_items != 1 else ''})"
+            f"{BUDGET_CATEGORY_LABELS[cat]} — USD {cat_data['estimated']:,.0f} estimado ({n_items} item{'s' if n_items != 1 else ''}{exp_suffix})"
         ):
             for item in cat_items:
                 icon = ITEM_TYPE_ICONS.get(ItemType(item["item_type"]), "📦")
@@ -177,6 +189,12 @@ try:
                     f"{icon} **{item['name']}** — "
                     f"Est: USD {item.get('cost_estimated', 0):,.0f}{real_str}"
                 )
+            if cat_expenses:
+                st.caption("Gastos directos:")
+                for exp in cat_expenses:
+                    st.markdown(
+                        f"💰 **{exp['name']}** — USD {exp['amount']:,.0f}"
+                    )
 
 except Exception as e:
     st.error(f"Error al cargar el presupuesto: {e}")

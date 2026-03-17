@@ -194,12 +194,26 @@ _REMOVE_ITEM_LABELS = {
     "item_count": "Cantidad",
 }
 
+_EXPENSE_LABELS = {
+    "name": "Gasto",
+    "category": "Categoria",
+    "amount": "Monto",
+    "Gasto actual": "Gasto actual",
+    "Nuevo nombre": "Nuevo nombre",
+    "Nuevo monto": "Nuevo monto",
+    "Nueva categoria": "Nueva categoria",
+    "item_count": "Cantidad",
+}
+
 # Iconos contextuales por tipo de accion
 _ACTION_ICONS = {
     "create_trip": "\U0001F30D",
     "add_item": "\u2795",
     "remove_item": "\U0001F5D1\uFE0F",
     "calendar_event": "\U0001F4C5",
+    "add_expense": "\U0001F4B0",
+    "modify_expense": "\u270F\uFE0F",
+    "remove_expense": "\U0001F5D1\uFE0F",
 }
 
 # Modificador CSS por tipo de accion
@@ -208,6 +222,9 @@ _ACTION_CSS_MODIFIER = {
     "add_item": "tp-confirmation--add",
     "remove_item": "tp-confirmation--delete",
     "calendar_event": "",
+    "add_expense": "tp-confirmation--add",
+    "modify_expense": "",
+    "remove_expense": "tp-confirmation--delete",
 }
 
 
@@ -235,6 +252,8 @@ def render_confirmation(action_data: dict, msg_index: int) -> str:
                 label = _ADD_ITEM_LABELS.get(key, key)
             elif action == "remove_item":
                 label = _REMOVE_ITEM_LABELS.get(key, key)
+            elif action in ("add_expense", "modify_expense", "remove_expense"):
+                label = _EXPENSE_LABELS.get(key, key)
             else:
                 label = key
             safe_val = html_module.escape(str(val))

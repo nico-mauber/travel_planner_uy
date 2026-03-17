@@ -31,7 +31,7 @@ def _row_to_item(row: dict) -> dict:
     }
 
 
-def _row_to_trip(row: dict, items: list) -> dict:
+def _row_to_trip(row: dict, items: list, expenses: list = None) -> dict:
     """Convierte un row de trips de Supabase a dict de la app."""
     # start_date y end_date pueden venir como date o string
     start_date = str(row.get("start_date", ""))[:10]
@@ -47,6 +47,7 @@ def _row_to_trip(row: dict, items: list) -> dict:
         "status": row.get("status", TripStatus.PLANNING.value),
         "budget_total": float(row.get("budget_total") or 0.0),
         "items": items,
+        "expenses": expenses or [],
         "notes": row.get("notes", ""),
     }
 
@@ -107,11 +108,25 @@ def load_trips(user_id: Optional[str] = None) -> list:
             items_by_trip[tid] = []
         items_by_trip[tid].append(_row_to_item(item_row))
 
+    # Cargar expenses de todos los viajes del usuario
+    from services.expense_service import _row_to_expense
+    expenses_result = sb.table("expenses").select("*").in_("trip_id", trip_ids).execute()
+    all_expenses = expenses_result.data or []
+
+    # Agrupar expenses por trip_id
+    expenses_by_trip = {}
+    for exp_row in all_expenses:
+        tid = exp_row["trip_id"]
+        if tid not in expenses_by_trip:
+            expenses_by_trip[tid] = []
+        expenses_by_trip[tid].append(_row_to_expense(exp_row))
+
     # Construir lista de trips
     trips = []
     for trip_row in trip_rows:
         trip_items = items_by_trip.get(trip_row["id"], [])
-        trips.append(_row_to_trip(trip_row, trip_items))
+        trip_expenses = expenses_by_trip.get(trip_row["id"], [])
+        trips.append(_row_to_trip(trip_row, trip_items, trip_expenses))
 
     return trips
 
@@ -156,6 +171,7 @@ def create_trip(trips: list, name: str, destination: str,
         "status": TripStatus.PLANNING.value,
         "budget_total": 0.0,
         "items": [],
+        "expenses": [],
         "notes": "",
     }
     trips.append(trip)
@@ -349,6 +365,8 @@ def recalculate_budget(trip: dict) -> None:
     for item in trip["items"]:
         if item["status"] != ItemStatus.SUGGESTED.value:
             total += item.get("cost_estimated", 0.0)
+    for exp in trip.get("expenses", []):
+        total += exp.get("amount", 0.0)
     trip["budget_total"] = total
 
 
@@ -402,6 +420,21 @@ def sync_trip_changes(trips: list, trip: dict, user_id: Optional[str] = None) ->
     # Upsert items actuales
     for item in trip.get("items", []):
         sb.table("itinerary_items").upsert(_item_to_row(item), on_conflict="id").execute()
+
+    # Sincronizar expenses
+    from services.expense_service import _expense_to_row
+    db_expenses_result = sb.table("expenses").select("id").eq("trip_id", trip["id"]).execute()
+    db_expense_ids = {r["id"] for r in (db_expenses_result.data or [])}
+    mem_expense_ids = {exp["id"] for exp in trip.get("expenses", [])}
+
+    # Eliminar expenses que ya no están en memoria
+    removed_exp_ids = db_expense_ids - mem_expense_ids
+    for rid in removed_exp_ids:
+        sb.table("expenses").delete().eq("id", rid).execute()
+
+    # Upsert expenses actuales
+    for exp in trip.get("expenses", []):
+        sb.table("expenses").upsert(_expense_to_row(exp), on_conflict="id").execute()
 
     # Refrescar budget_total desde el trigger
     _refresh_trip_budget(sb, trip)

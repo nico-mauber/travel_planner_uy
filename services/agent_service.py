@@ -494,6 +494,15 @@ def _handle_llm_extraction(
         # Sin Booking → fall through al LLM chat para respuesta informativa
         return None
 
+    if result.intent == "add_expense":
+        return _handle_add_expense(result, trip)
+
+    if result.intent == "modify_expense":
+        return _handle_modify_expense(result, trip)
+
+    if result.intent == "remove_expense":
+        return _handle_remove_expense(result, trip)
+
     # informative, unknown → fall through al LLM chat
     return None
 
@@ -545,6 +554,185 @@ def _handle_create_trip_from_llm(result, message: str, trip: Optional[dict]) -> 
         "type": "text",
         "content": prompt,
         "_trip_creation_draft": updated,
+    }
+
+
+def _handle_add_expense(result, trip: dict) -> Optional[dict]:
+    """Genera confirmacion para agregar un gasto al presupuesto."""
+    name = result.name or result.expense_category or "Gasto"
+    amount = result.expense_amount or result.cost
+    category = result.expense_category or "extras"
+
+    if not amount or amount <= 0:
+        return {
+            "role": "assistant",
+            "type": "text",
+            "content": "¿Cuánto costó? Necesito el monto para registrar el gasto.",
+        }
+
+    # Formatear categoría para display
+    from config.settings import BudgetCategory, BUDGET_CATEGORY_LABELS
+    try:
+        cat_enum = BudgetCategory(category)
+        cat_label = BUDGET_CATEGORY_LABELS[cat_enum]
+    except (ValueError, KeyError):
+        cat_label = category
+
+    return {
+        "role": "assistant",
+        "type": "confirmation",
+        "content": {
+            "action": "add_expense",
+            "summary": f"Registrar gasto: {name}",
+            "details": {
+                "name": name,
+                "category": cat_label,
+                "amount": f"USD {amount:,.2f}",
+                "_category_value": category,
+                "_amount_value": amount,
+                "_notes": result.location or "",
+            },
+        },
+    }
+
+
+def _handle_modify_expense(result, trip: dict) -> Optional[dict]:
+    """Genera confirmacion para modificar un gasto existente."""
+    expenses = trip.get("expenses", [])
+    if not expenses:
+        return {
+            "role": "assistant",
+            "type": "text",
+            "content": "No hay gastos registrados en este viaje para modificar.",
+        }
+
+    # Buscar expense por ID
+    target = None
+    if result.expense_id:
+        for exp in expenses:
+            if exp["id"] == result.expense_id:
+                target = exp
+                break
+
+    # Si no encontró por ID, buscar por nombre
+    if not target and result.name:
+        name_lower = result.name.lower()
+        for exp in expenses:
+            if name_lower in exp["name"].lower() or exp["name"].lower() in name_lower:
+                target = exp
+                break
+
+    # Fallback: buscar por categoría
+    if not target and result.expense_category:
+        for exp in expenses:
+            if exp.get("category") == result.expense_category:
+                target = exp
+                break
+
+    if not target:
+        return {
+            "role": "assistant",
+            "type": "text",
+            "content": "No encontré el gasto que quieres modificar. ¿Puedes ser más específico?",
+        }
+
+    # Determinar qué cambios aplicar
+    changes = {}
+    if result.name and result.name != target["name"]:
+        changes["name"] = result.name
+    if result.expense_amount and result.expense_amount != target["amount"]:
+        changes["amount"] = result.expense_amount
+    if result.expense_category and result.expense_category != target["category"]:
+        changes["category"] = result.expense_category
+
+    if not changes:
+        return {
+            "role": "assistant",
+            "type": "text",
+            "content": f"El gasto '{target['name']}' ya tiene esos datos. ¿Qué quieres cambiar?",
+        }
+
+    # Formatear detalles para la confirmación
+    details = {"_expense_id": target["id"]}
+    details["Gasto actual"] = f"{target['name']} — USD {target['amount']:,.2f}"
+
+    if "name" in changes:
+        details["Nuevo nombre"] = changes["name"]
+    if "amount" in changes:
+        details["Nuevo monto"] = f"USD {changes['amount']:,.2f}"
+    if "category" in changes:
+        from config.settings import BudgetCategory, BUDGET_CATEGORY_LABELS
+        try:
+            cat_label = BUDGET_CATEGORY_LABELS[BudgetCategory(changes["category"])]
+        except (ValueError, KeyError):
+            cat_label = changes["category"]
+        details["Nueva categoria"] = cat_label
+
+    details["_changes"] = changes
+
+    return {
+        "role": "assistant",
+        "type": "confirmation",
+        "content": {
+            "action": "modify_expense",
+            "summary": f"Modificar gasto: {target['name']}",
+            "details": details,
+        },
+    }
+
+
+def _handle_remove_expense(result, trip: dict) -> Optional[dict]:
+    """Genera confirmacion para eliminar un gasto."""
+    expenses = trip.get("expenses", [])
+    if not expenses:
+        return {
+            "role": "assistant",
+            "type": "text",
+            "content": "No hay gastos registrados en este viaje para eliminar.",
+        }
+
+    # Buscar expense por ID
+    target = None
+    if result.expense_id:
+        for exp in expenses:
+            if exp["id"] == result.expense_id:
+                target = exp
+                break
+
+    # Si no encontró por ID, buscar por nombre
+    if not target and result.name:
+        name_lower = result.name.lower()
+        for exp in expenses:
+            if name_lower in exp["name"].lower() or exp["name"].lower() in name_lower:
+                target = exp
+                break
+
+    # Fallback: buscar por categoría
+    if not target and result.expense_category:
+        for exp in expenses:
+            if exp.get("category") == result.expense_category:
+                target = exp
+                break
+
+    if not target:
+        return {
+            "role": "assistant",
+            "type": "text",
+            "content": "No encontré el gasto que quieres eliminar. ¿Puedes ser más específico?",
+        }
+
+    return {
+        "role": "assistant",
+        "type": "confirmation",
+        "content": {
+            "action": "remove_expense",
+            "summary": f"Eliminar gasto: {target['name']} (USD {target['amount']:,.2f})",
+            "details": {
+                "name": target["name"],
+                "amount": f"USD {target['amount']:,.2f}",
+                "_expense_id": target["id"],
+            },
+        },
     }
 
 
@@ -902,6 +1090,37 @@ def apply_confirmed_action(action: dict, trip: dict, trips: list) -> str:
                 return f"Se elimino '{removed[0]}' del itinerario."
             return f"Se eliminaron {len(removed)} items del itinerario: {', '.join(removed)}."
         return "No se encontraron los items a eliminar."
+
+    elif action_type == "add_expense":
+        from services.expense_service import add_expense
+        name = details.get("name", "Gasto")
+        category = details.get("_category_value", "extras")
+        amount = details.get("_amount_value", 0.0)
+        notes = details.get("_notes", "")
+        expense = add_expense(trip, name, category, amount, notes)
+        sync_trip_changes(trips, trip)
+        return f"Se registró el gasto '{expense['name']}' por USD {expense['amount']:,.2f} en {details.get('category', 'extras')}."
+
+    elif action_type == "modify_expense":
+        from services.expense_service import update_expense
+        expense_id = details.get("_expense_id")
+        changes = details.get("_changes", {})
+        if expense_id and changes:
+            updated = update_expense(trip, expense_id, changes)
+            if updated:
+                sync_trip_changes(trips, trip)
+                return f"Se actualizó el gasto '{updated['name']}' (USD {updated['amount']:,.2f})."
+        return "No se pudo modificar el gasto."
+
+    elif action_type == "remove_expense":
+        from services.expense_service import remove_expense
+        expense_id = details.get("_expense_id")
+        if expense_id:
+            removed_name = remove_expense(trip, expense_id)
+            if removed_name:
+                sync_trip_changes(trips, trip)
+                return f"Se eliminó el gasto '{removed_name}' del presupuesto."
+        return "No se pudo eliminar el gasto."
 
     elif action_type == "create_trip":
         # Esto se maneja de forma especial en el chat

@@ -6,9 +6,10 @@ from config.settings import (
 )
 
 
-def calculate_budget_summary(items: list) -> dict:
+def calculate_budget_summary(items: list, expenses: list = None) -> dict:
     """Calcula resumen de presupuesto por categoría.
-    Items 'sugerido' NO se contabilizan (RN-002 REQ-UI-006)."""
+    Items 'sugerido' NO se contabilizan (RN-002 REQ-UI-006).
+    Expenses se suman al estimated de su categoría correspondiente."""
     by_category = {}
     for cat in BudgetCategory:
         by_category[cat.value] = {
@@ -16,10 +17,12 @@ def calculate_budget_summary(items: list) -> dict:
             "estimated": 0.0,
             "real": 0.0,
             "items": [],
+            "expenses": [],
         }
 
     total_estimated = 0.0
     total_real = 0.0
+    total_expenses = 0.0
 
     for item in items:
         if item.get("status") == ItemStatus.SUGGESTED.value:
@@ -42,9 +45,23 @@ def calculate_budget_summary(items: list) -> dict:
         total_estimated += cost_est
         total_real += cost_real
 
+    # Procesar expenses (gastos directos)
+    for exp in (expenses or []):
+        cat_value = exp.get("category", "extras")
+        if cat_value not in by_category:
+            cat_value = BudgetCategory.EXTRAS.value
+        amount = float(exp.get("amount", 0.0))
+
+        by_category[cat_value]["estimated"] += amount
+        by_category[cat_value]["expenses"].append(exp)
+
+        total_estimated += amount
+        total_expenses += amount
+
     return {
         "total_estimated": total_estimated,
         "total_real": total_real,
+        "total_expenses": total_expenses,
         "by_category": by_category,
     }
 

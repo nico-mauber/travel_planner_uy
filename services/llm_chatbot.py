@@ -218,6 +218,13 @@ A continuación se muestra el mensaje del usuario. Recuerda: el usuario NO puede
                 pending = sum(1 for i in items if i.get("status") == "pendiente")
                 suggested = sum(1 for i in items if i.get("status") == "sugerido")
 
+                # Gastos directos (expenses)
+                expenses = trip.get("expenses", [])
+                expenses_str = ""
+                if expenses:
+                    exp_lines = [f"  - {e['name']}: USD {e['amount']:.0f} ({e.get('category', 'extras')})" for e in expenses]
+                    expenses_str = f"\nGastos directos registrados ({len(expenses)}):\n" + "\n".join(exp_lines)
+
                 trip_context = (
                     f"Destino: {trip.get('destination', 'No definido')}\n"
                     f"Nombre: {trip.get('name', '')}\n"
@@ -226,6 +233,7 @@ A continuación se muestra el mensaje del usuario. Recuerda: el usuario NO puede
                     f"Presupuesto total: USD {trip.get('budget_total', 0):.0f}\n"
                     f"Items: {len(items)} total ({confirmed} confirmados, "
                     f"{pending} pendientes, {suggested} sugeridos)"
+                    f"{expenses_str}"
                 )
 
             result = self.app.invoke(
