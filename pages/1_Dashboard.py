@@ -3,10 +3,14 @@
 import streamlit as st
 from datetime import date
 
+if "trips" not in st.session_state:
+    st.switch_page("app.py")
+
 from config.settings import TripStatus, ItemStatus, TRIP_STATUS_LABELS
 from services.trip_service import get_active_trip, get_trip_by_id
 from services.budget_service import calculate_budget_summary, calculate_planning_progress
 from services.feedback_service import has_pending_feedback
+from services.weather_service import get_weather
 from components.alert_banner import get_alerts, render_alerts
 
 try:
@@ -26,13 +30,32 @@ try:
     available_trips = [t for t in trips if t["status"] in active_statuses]
 
     if not available_trips:
-        st.info("No hay viajes activos. Ve a **Mis Viajes** para crear uno.")
+        # Onboarding para usuarios sin viajes
+        st.markdown("""
+<div class="tp-onboarding">
+  <div class="tp-onboarding__title">👋 ¡Bienvenido a Trip Planner!</div>
+  <div class="tp-onboarding__steps">
+    <div class="tp-onboarding__step">
+      <div class="tp-onboarding__step-num">1</div>
+      <div class="tp-onboarding__step-text"><strong>Creá un viaje</strong> — Definí destino, fechas y nombre</div>
+    </div>
+    <div class="tp-onboarding__step">
+      <div class="tp-onboarding__step-num">2</div>
+      <div class="tp-onboarding__step-text"><strong>Chateá con el asistente</strong> — Agregá actividades, hoteles y vuelos con lenguaje natural</div>
+    </div>
+    <div class="tp-onboarding__step">
+      <div class="tp-onboarding__step-num">3</div>
+      <div class="tp-onboarding__step-text"><strong>Revisá tu itinerario</strong> — Todo organizado día a día con presupuesto y cronograma</div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Ir a Mis Viajes", type="primary", use_container_width=True, help="Navegar a la pagina de gestion de viajes"):
+            if st.button("🚀 Crear mi primer viaje", type="primary", use_container_width=True, help="Navegar a la pagina de gestion de viajes"):
                 st.switch_page("pages/7_Mis_Viajes.py")
         with col2:
-            if st.button("Abrir Chat", use_container_width=True, help="Navegar al chat con el asistente"):
+            if st.button("💬 Abrir Chat", use_container_width=True, help="Navegar al chat con el asistente"):
                 st.switch_page("pages/2_Chat.py")
         st.stop()
 
@@ -58,6 +81,7 @@ try:
         st.stop()
 
     # ─── Dashboard con viaje activo ───
+    st.markdown(f'<div class="tp-breadcrumb">🏠 Dashboard  ›  {trip.get("destination", "")}</div>', unsafe_allow_html=True)
     st.header(f"{trip['name']}")
     st.caption(f"Destino: {trip['destination']} — {trip['start_date']} a {trip['end_date']}")
 
@@ -78,13 +102,16 @@ try:
         )
     with m2:
         if days_left > 0:
+            delta_text = "¡Muy pronto!" if days_left < 7 else None
             st.metric(
-                "Dias restantes", f"{days_left} dias",
+                "Dias restantes", f"{days_left} días",
+                delta=delta_text,
+                delta_color="inverse" if days_left < 7 else "off",
                 help="Dias hasta la fecha de inicio del viaje",
             )
         elif days_left == 0:
             st.metric(
-                "Estado", "Hoy empieza",
+                "Estado", "¡Hoy empieza! 🎉",
                 help="El viaje comienza hoy",
             )
         else:
@@ -125,6 +152,22 @@ try:
         render_alerts(alerts)
         st.divider()
 
+    # ─── Widget de clima ───
+    weather = get_weather(trip.get("destination", ""))
+    if weather:
+        st.markdown(
+            f'<div class="tp-weather">'
+            f'<div class="tp-weather__icon">{weather["icon"]}</div>'
+            f'<div class="tp-weather__info">'
+            f'<div class="tp-weather__temp">{weather["temp_min"]}°–{weather["temp_max"]}°C</div>'
+            f'<div class="tp-weather__condition">{weather["condition"]}</div>'
+            f'<div class="tp-weather__desc">{weather["description"]}</div>'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+
     # ─── Fila 4: Accesos rapidos ───
     st.subheader("Accesos rapidos")
     q1, q2, q3, q4 = st.columns(4)
@@ -142,6 +185,8 @@ try:
             st.switch_page("pages/5_Presupuesto.py")
 
 except Exception as e:
-    st.error(f"Error al cargar el dashboard: {e}")
+    st.error("❌ No se pudo cargar el dashboard. Verificá tu conexión e intentá de nuevo.")
+    with st.expander("Detalles técnicos", expanded=False):
+        st.code(str(e))
     if st.button("Reintentar", help="Recargar la pagina del dashboard"):
         st.rerun()

@@ -683,6 +683,200 @@ hr {
 }
 
 /* ==========================================================================
+   NUEVAS CLASES UX — Breadcrumb, Skeleton, Onboarding, Weather, Legend
+   ========================================================================== */
+
+/* ── Breadcrumb ── */
+.tp-breadcrumb {
+  color: var(--tp-text-muted);
+  font-size: var(--tp-text-sm);
+  margin-bottom: var(--tp-space-2);
+  line-height: 1.5;
+}
+
+/* ── Skeleton loader ── */
+@keyframes tp-skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+.tp-skeleton {
+  background: var(--tp-bg-tertiary);
+  border-radius: var(--tp-radius-md);
+  animation: tp-skeleton-pulse 1.5s ease-in-out infinite;
+}
+.tp-skeleton--card { height: 120px; margin-bottom: var(--tp-space-4); }
+.tp-skeleton--metric { height: 80px; }
+.tp-skeleton--text { height: 14px; width: 60%; margin-bottom: var(--tp-space-2); }
+
+/* ── Fade-out (para confirmaciones procesadas) ── */
+@keyframes tp-fade-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-6px); }
+}
+.tp-fade-out {
+  animation: tp-fade-out var(--tp-transition-normal) ease-out forwards;
+}
+
+/* ── Onboarding / bienvenida ── */
+.tp-onboarding {
+  background: var(--tp-bg-secondary);
+  border: 1px solid var(--tp-accent-blue-subtle);
+  border-radius: var(--tp-radius-lg);
+  padding: var(--tp-space-8);
+  text-align: center;
+  max-width: 640px;
+  margin: var(--tp-space-6) auto;
+}
+.tp-onboarding__title {
+  font-size: var(--tp-text-2xl);
+  font-weight: 700;
+  color: var(--tp-text-primary);
+  margin-bottom: var(--tp-space-4);
+}
+.tp-onboarding__steps {
+  text-align: left;
+  margin: var(--tp-space-4) 0;
+}
+.tp-onboarding__step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--tp-space-3);
+  padding: var(--tp-space-3) 0;
+  border-bottom: 1px solid var(--tp-border-default);
+}
+.tp-onboarding__step:last-child { border-bottom: none; }
+.tp-onboarding__step-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  background: var(--tp-accent-blue);
+  color: var(--tp-bg-primary);
+  border-radius: var(--tp-radius-full);
+  font-weight: 700;
+  font-size: var(--tp-text-sm);
+}
+.tp-onboarding__step-text { color: var(--tp-text-secondary); font-size: var(--tp-text-sm); line-height: 1.5; }
+.tp-onboarding__step-text strong { color: var(--tp-text-primary); }
+
+/* ── Weather widget ── */
+.tp-weather {
+  display: flex;
+  align-items: center;
+  gap: var(--tp-space-4);
+  padding: var(--tp-space-3) var(--tp-space-4);
+  background: var(--tp-bg-secondary);
+  border: 1px solid var(--tp-border-default);
+  border-radius: var(--tp-radius-md);
+  margin: var(--tp-space-3) 0;
+}
+.tp-weather__icon { font-size: 2rem; }
+.tp-weather__info { flex: 1; }
+.tp-weather__temp {
+  font-size: var(--tp-text-xl);
+  font-weight: 600;
+  color: var(--tp-text-primary);
+}
+.tp-weather__condition { font-size: var(--tp-text-sm); color: var(--tp-text-secondary); }
+.tp-weather__desc { font-size: var(--tp-text-xs); color: var(--tp-text-muted); margin-top: 2px; }
+
+/* ── Leyenda de colores (calendario, itinerario) ── */
+.tp-legend {
+  display: flex;
+  gap: var(--tp-space-3);
+  flex-wrap: wrap;
+  padding: var(--tp-space-2) 0;
+  margin-bottom: var(--tp-space-2);
+}
+.tp-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tp-space-1);
+  font-size: var(--tp-text-sm);
+  color: var(--tp-text-secondary);
+}
+.tp-legend__dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--tp-radius-sm);
+  flex-shrink: 0;
+}
+
+/* ── Quick-action buttons (chat) ── */
+.tp-quick-actions {
+  display: flex;
+  gap: var(--tp-space-2);
+  flex-wrap: wrap;
+  margin: var(--tp-space-3) 0;
+}
+.tp-quick-action-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tp-space-1);
+  padding: var(--tp-space-2) var(--tp-space-3);
+  background: var(--tp-bg-tertiary);
+  color: var(--tp-text-secondary);
+  border: 1px solid var(--tp-border-default);
+  border-radius: var(--tp-radius-full);
+  font-size: var(--tp-text-sm);
+  cursor: pointer;
+  transition: background var(--tp-transition-fast),
+              color var(--tp-transition-fast),
+              border-color var(--tp-transition-fast),
+              transform var(--tp-transition-fast);
+}
+.tp-quick-action-pill:hover {
+  background: var(--tp-accent-blue-subtle);
+  color: var(--tp-accent-blue);
+  border-color: var(--tp-accent-blue);
+  transform: translateY(-1px);
+}
+
+/* ── Indicador de modo LLM ── */
+.tp-llm-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tp-space-1);
+  padding: 2px var(--tp-space-3);
+  border-radius: var(--tp-radius-full);
+  font-size: var(--tp-text-xs);
+  font-weight: 500;
+}
+.tp-llm-indicator--active {
+  background: var(--tp-accent-green-subtle);
+  color: var(--tp-accent-green);
+}
+.tp-llm-indicator--basic {
+  background: var(--tp-accent-gray-subtle);
+  color: var(--tp-accent-gray);
+}
+
+/* ── Trip card name truncation ── */
+.tp-trip-card__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+/* ── Active trip indicator (chat) ── */
+.tp-trip-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tp-space-2);
+  padding: var(--tp-space-1) var(--tp-space-3);
+  background: var(--tp-bg-tertiary);
+  border: 1px solid var(--tp-border-default);
+  border-radius: var(--tp-radius-full);
+  font-size: var(--tp-text-sm);
+  color: var(--tp-text-secondary);
+  margin-bottom: var(--tp-space-2);
+}
+
+/* ==========================================================================
    REDUCED MOTION — Desactivar todas las animaciones
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
@@ -699,6 +893,19 @@ hr {
   .tp-card:hover,
   .tp-trip-card:hover {
     transform: none;
+  }
+
+  .tp-skeleton,
+  .tp-skeleton--card,
+  .tp-skeleton--metric,
+  .tp-skeleton--text {
+    animation: none;
+    opacity: 0.6;
+  }
+
+  .tp-fade-out {
+    animation: none;
+    opacity: 0;
   }
 }
 """

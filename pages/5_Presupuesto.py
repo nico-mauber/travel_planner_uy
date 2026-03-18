@@ -2,6 +2,9 @@
 
 import streamlit as st
 
+if "trips" not in st.session_state:
+    st.switch_page("app.py")
+
 from config.settings import (
     BudgetCategory, BUDGET_CATEGORY_LABELS, BUDGET_CATEGORY_COLORS,
     ITEM_TYPE_ICONS, ItemType, TripStatus,
@@ -15,6 +18,7 @@ try:
     trips = st.session_state.trips
 
     st.title("Presupuesto")
+    st.markdown('<div class="tp-breadcrumb">🏠 Dashboard  ›  💰 Presupuesto</div>', unsafe_allow_html=True)
 
     # ─── Selector de viaje ───
     active_statuses = [TripStatus.PLANNING.value, TripStatus.CONFIRMED.value, TripStatus.IN_PROGRESS.value]
@@ -96,7 +100,9 @@ try:
     st.divider()
 
     if (not items and not expenses) or budget["total_estimated"] == 0:
-        st.info("No hay items ni gastos con costos para mostrar el presupuesto.")
+        st.info("💡 Tus items no tienen costos estimados aún. Usá el **Chat** para agregar precios a las actividades, o editá los items existentes.")
+        if st.button("💬 Ir al Chat", help="Abrir el chat para agregar costos a los items"):
+            st.switch_page("pages/2_Chat.py")
         st.stop()
 
     # ─── Fila 2: Donut + Tabla ───

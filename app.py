@@ -57,11 +57,22 @@ st.markdown(f"<style>{get_global_css()}</style>", unsafe_allow_html=True)
 # ─── Verificar conexión Supabase ───
 from services.supabase_client import is_supabase_available
 if not is_supabase_available():
+    # DEBUG: mostrar error real
+    _dbg_url = os.environ.get("SUPABASE_URL", "NOT SET")
+    _dbg_key = os.environ.get("SUPABASE_SERVICE_KEY", "NOT SET")
     st.error(
-        "**No se pudo conectar a Supabase.** Verifica que las variables "
-        "`SUPABASE_URL` y `SUPABASE_SERVICE_KEY` estén configuradas en `.env` "
-        "y que el schema haya sido creado en Supabase."
+        f"**No se pudo conectar a Supabase.**\n\n"
+        f"URL: `{_dbg_url[:50]}...`\n\n"
+        f"KEY: `{_dbg_key[:30]}...` ({len(_dbg_key)} chars)\n\n"
+        f"Verifica `.env` y que el schema exista."
     )
+    try:
+        from services.supabase_client import get_supabase_client
+        c = get_supabase_client()
+        r = c.table("users").select("user_id").limit(1).execute()
+        st.success(f"DEBUG: Query OK: {r.data}")
+    except Exception as _dbg_e:
+        st.error(f"DEBUG error real: `{type(_dbg_e).__name__}: {_dbg_e}`")
     st.stop()
 
 # ─── Verificar entorno y diagnostico de auth ───

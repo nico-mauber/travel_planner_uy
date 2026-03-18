@@ -3,6 +3,9 @@
 import html
 
 import streamlit as st
+
+if "trips" not in st.session_state:
+    st.switch_page("app.py")
 from datetime import date, timedelta
 
 from config.settings import ITEM_TYPE_COLORS, ITEM_TYPE_ICONS, ItemType, ItemStatus, STATUS_ICONS
@@ -80,6 +83,7 @@ try:
     trips = st.session_state.trips
 
     st.title("Cronograma")
+    st.markdown('<div class="tp-breadcrumb">🏠 Dashboard  ›  📅 Cronograma</div>', unsafe_allow_html=True)
     st.caption("Vista global de todas las actividades planificadas en todos tus viajes.")
 
     # ─── Recopilar items de TODOS los viajes con fechas definidas ───
@@ -103,6 +107,21 @@ try:
             st.switch_page("pages/2_Chat.py")
         st.stop()
 
+    # ─── Filtro por viaje ───
+    trip_names = {t["id"]: t.get("name", t.get("destination", f"Viaje {i+1}")) for i, t in enumerate(valid_trips)}
+    if len(valid_trips) > 1:
+        selected_trip_ids = st.multiselect(
+            "Filtrar por viaje",
+            options=list(trip_names.keys()),
+            default=list(trip_names.keys()),
+            format_func=lambda k: trip_names[k],
+            help="Seleccioná los viajes que querés ver en el cronograma",
+        )
+        # Filtrar all_events_data y valid_trips según selección
+        if selected_trip_ids:
+            all_events_data = [(t, i) for t, i in all_events_data if t["id"] in selected_trip_ids]
+            valid_trips = [t for t in valid_trips if t["id"] in selected_trip_ids]
+
     # ─── Selector de vista ───
     view = st.radio(
         "Tipo de vista del calendario",
@@ -113,14 +132,14 @@ try:
 
     # ─── Leyenda de tipos de items ───
     st.markdown(
-        '<div style="display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 0.75rem;">'
-        '<span class="tp-calendar-event" style="border-left-color: #56D364; display: inline-block; padding: 2px 8px;">Actividad</span>'
-        '<span class="tp-calendar-event" style="border-left-color: #58A6FF; display: inline-block; padding: 2px 8px;">Alojamiento</span>'
-        '<span class="tp-calendar-event" style="border-left-color: #FFA657; display: inline-block; padding: 2px 8px;">Comida</span>'
-        '<span class="tp-calendar-event" style="border-left-color: #FF7B72; display: inline-block; padding: 2px 8px;">Vuelo</span>'
-        '<span class="tp-calendar-event" style="border-left-color: #8B949E; display: inline-block; padding: 2px 8px;">Traslado</span>'
-        '<span class="tp-calendar-event" style="border-left-color: #BC8CFF; display: inline-block; padding: 2px 8px;">Extra</span>'
-        '<span class="tp-calendar-event" style="border-left-color: #607D8B; display: inline-block; padding: 2px 8px;">Multi-dia</span>'
+        '<div class="tp-legend">'
+        '<span class="tp-legend__item"><span class="tp-legend__dot" style="background:#56D364;"></span>Actividad</span>'
+        '<span class="tp-legend__item"><span class="tp-legend__dot" style="background:#58A6FF;"></span>Alojamiento</span>'
+        '<span class="tp-legend__item"><span class="tp-legend__dot" style="background:#FFA657;"></span>Comida</span>'
+        '<span class="tp-legend__item"><span class="tp-legend__dot" style="background:#FF7B72;"></span>Vuelo</span>'
+        '<span class="tp-legend__item"><span class="tp-legend__dot" style="background:#8B949E;"></span>Traslado</span>'
+        '<span class="tp-legend__item"><span class="tp-legend__dot" style="background:#BC8CFF;"></span>Extra</span>'
+        '<span class="tp-legend__item"><span class="tp-legend__dot" style="background:#607D8B;"></span>Multi-día</span>'
         '</div>',
         unsafe_allow_html=True,
     )

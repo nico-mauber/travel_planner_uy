@@ -2,15 +2,16 @@
 
 import streamlit as st
 from services.profile_service import save_profile
+
+if "trips" not in st.session_state:
+    st.switch_page("app.py")
 from services.auth_service import get_current_user_id
 
 
 try:
     st.title("Perfil y preferencias")
-    st.caption(
-        "Configura tus preferencias de viaje para que el agente personalice "
-        "sus sugerencias."
-    )
+    st.markdown('<div class="tp-breadcrumb">🏠 Dashboard  ›  👤 Perfil</div>', unsafe_allow_html=True)
+    st.info("✨ Tus preferencias ayudan al asistente a hacer sugerencias personalizadas. Cuanto más completes, mejores recomendaciones recibirás.")
     st.divider()
 
     user_id = get_current_user_id()
@@ -117,9 +118,9 @@ try:
                 }
                 if save_profile(new_profile, user_id=user_id):
                     st.session_state.user_profile = new_profile
-                    st.success("Preferencias guardadas correctamente.")
+                    st.toast("✅ Preferencias guardadas correctamente")
                 else:
-                    st.error("Error al guardar las preferencias. Intenta de nuevo.")
+                    st.error("❌ Error al guardar las preferencias. Intentá de nuevo.")
 
 except Exception as e:
     st.error(f"Error al cargar el perfil: {e}")

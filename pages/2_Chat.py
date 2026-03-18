@@ -4,6 +4,9 @@
 import streamlit as st
 from datetime import date, timedelta
 
+if "trips" not in st.session_state:
+    st.switch_page("app.py")
+
 from config.settings import TripStatus
 from services.trip_service import get_trip_by_id, create_trip
 from services.agent_service import process_message, apply_confirmed_action, is_llm_active, is_booking_active
@@ -35,15 +38,16 @@ try:
     user_id = get_current_user_id()
 
     st.title("Chat con el Agente")
+    st.markdown('<div class="tp-breadcrumb">🏠 Dashboard  ›  💬 Chat</div>', unsafe_allow_html=True)
 
-    # Indicador de modo — texto descriptivo ademas de nombre de modelo
+    # Indicador de modo — visual con badge
     if is_llm_active():
-        mode_label = "LLM activo (gpt-4.1-nano) — respuestas inteligentes habilitadas"
+        mode_html = '<span class="tp-llm-indicator tp-llm-indicator--active">🧠 Asistente inteligente activo</span>'
     else:
-        mode_label = "Modo basico — solo acciones por patron, sin LLM"
+        mode_html = '<span class="tp-llm-indicator tp-llm-indicator--basic">⚡ Modo básico — usá palabras clave como "agregar", "buscar hotel"</span>'
     if is_booking_active():
-        mode_label += " + Busqueda de hoteles (Booking.com)"
-    st.caption(mode_label)
+        mode_html += ' <span class="tp-llm-indicator tp-llm-indicator--active">🏨 Booking.com</span>'
+    st.markdown(mode_html, unsafe_allow_html=True)
 
     # ─── Selector obligatorio de viaje (REQ-CF-001) ───
     active_statuses = [TripStatus.PLANNING.value, TripStatus.CONFIRMED.value, TripStatus.IN_PROGRESS.value]
@@ -61,7 +65,10 @@ try:
     # Determinar indice inicial basado en session_state
     saved_selection = st.session_state.get("chat_selected_trip_id")
     default_index = 0
-    if saved_selection and saved_selection in selector_options:
+    if not available_trips:
+        # Usuario sin viajes: pre-seleccionar "Crear nuevo viaje" automáticamente
+        default_index = selector_options.index(_CREAR_NUEVO)
+    elif saved_selection and saved_selection in selector_options:
         default_index = selector_options.index(saved_selection)
 
     selected_key = st.selectbox(
@@ -82,10 +89,7 @@ try:
     is_creating_new_trip = False
 
     if selected_key == _PLACEHOLDER:
-        if not available_trips:
-            st.info("No tienes viajes activos. Selecciona 'Crear nuevo viaje' para comenzar.")
-        else:
-            st.info("Selecciona un viaje del selector para comenzar a chatear.")
+        st.info("Selecciona un viaje del selector para comenzar a chatear.")
 
     elif selected_key == _CREAR_NUEVO:
         is_creating_new_trip = True
@@ -136,6 +140,15 @@ try:
     with col_list:
         st.subheader("Conversaciones")
 
+        # Búsqueda en historial
+        search_query = st.text_input(
+            "Buscar conversación",
+            placeholder="🔍 Filtrar por título...",
+            label_visibility="collapsed",
+            help="Filtra conversaciones por título",
+            key="chat_search",
+        )
+
         # Boton nuevo chat
         if chat_enabled:
             if st.button("Nuevo Chat", use_container_width=True, type="primary", help="Crear una nueva conversacion con el asistente"):
@@ -164,6 +177,10 @@ try:
             visible_chats = [c for c in user_chats if not c.get("trip_id")]
         else:
             visible_chats = user_chats
+
+        # Aplicar filtro de búsqueda
+        if search_query:
+            visible_chats = [c for c in visible_chats if search_query.lower() in c.get("title", "").lower()]
 
         if not visible_chats:
             st.caption("No hay conversaciones para este viaje.")
@@ -241,6 +258,16 @@ try:
         # ─── Historial del chat activo ───
         history = active_chat.get("messages", [])
 
+        # Paginación: mostrar solo últimos 30 mensajes
+        MAX_VISIBLE_MESSAGES = 30
+        if len(history) > MAX_VISIBLE_MESSAGES:
+            hidden_count = len(history) - MAX_VISIBLE_MESSAGES
+            if not st.session_state.get(f"_show_all_{active_chat_id}"):
+                if st.button(f"⬆️ Cargar {hidden_count} mensajes anteriores", key="load_more_msgs", help="Mostrar mensajes más antiguos de esta conversación"):
+                    st.session_state[f"_show_all_{active_chat_id}"] = True
+                    st.rerun()
+                history = history[-MAX_VISIBLE_MESSAGES:]
+
         # Mensaje de bienvenida si el chat esta vacio
         if not history:
             if is_creating_new_trip:
@@ -269,6 +296,23 @@ try:
             persist_chat(active_chat)
             st.session_state.user_chats = load_chats(user_id)
             history = active_chat["messages"]
+
+            # Quick-action buttons para nuevo chat
+            if chat_trip and not is_creating_new_trip:
+                st.markdown('<div class="tp-quick-actions">', unsafe_allow_html=True)
+                qa_cols = st.columns(4)
+                quick_actions = [
+                    ("🏨 Buscar hotel", f"Buscar hoteles en {chat_trip.get('destination', 'el destino')}"),
+                    ("🎯 Agregar actividad", "Agregar una actividad para el día 1"),
+                    ("🍽️ Restaurante", "Agregar un restaurante para almorzar el día 1"),
+                    ("📋 Sugerir plan", "¿Qué me sugerís para el primer día?"),
+                ]
+                for i, (label, prompt_text) in enumerate(quick_actions):
+                    with qa_cols[i]:
+                        if st.button(label, key=f"qa_{i}_{active_chat_id}", use_container_width=True, help=f'Enviar: "{prompt_text}"'):
+                            st.session_state[f"_quick_action_{active_chat_id}"] = prompt_text
+                            st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
         # ─── Renderizar mensajes ───
         for i, msg in enumerate(history):
@@ -365,7 +409,12 @@ try:
                             st.rerun()
 
         # ─── Input del usuario ───
-        if user_input := st.chat_input("Escribe tu mensaje al asistente de viajes..."):
+        # Verificar si hay quick-action pendiente
+        _quick_action_key = f"_quick_action_{active_chat_id}"
+        quick_action_input = st.session_state.pop(_quick_action_key, None)
+
+        user_input = st.chat_input("Escribí tu mensaje al asistente de viajes...") or quick_action_input
+        if user_input:
             # Capturar historial ANTES de agregar el mensaje actual
             # (el mensaje actual se pasa por separado como 'message' a process_message)
             chat_history = active_chat.get("messages", [])
@@ -419,6 +468,8 @@ try:
             st.rerun()
 
 except Exception as e:
-    st.error(f"Error en el chat: {e}")
+    st.error("❌ Ocurrió un error en el chat. Por favor, intentá de nuevo.")
+    with st.expander("Detalles técnicos", expanded=False):
+        st.code(str(e))
     if st.button("Reintentar", help="Recargar la pagina del chat"):
         st.rerun()

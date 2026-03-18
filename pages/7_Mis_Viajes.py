@@ -3,6 +3,9 @@
 import streamlit as st
 from datetime import date, timedelta
 
+if "trips" not in st.session_state:
+    st.switch_page("app.py")
+
 from config.settings import TripStatus, TRIP_STATUS_LABELS
 from services.trip_service import (
     sort_trips, filter_trips_by_status, delete_trip,
@@ -81,10 +84,10 @@ def _render_feedback_section(trip: dict, idx: int, user_id: str = None) -> None:
                     "item_feedbacks": item_feedbacks,
                 }
                 if save_feedback(trip["id"], feedback_data, user_id=user_id):
-                    st.success("¡Gracias por tu feedback!")
+                    st.toast("✅ ¡Gracias por tu feedback!")
                     st.rerun()
                 else:
-                    st.error("Error al guardar el feedback.")
+                    st.error("❌ Error al guardar el feedback. Intentá de nuevo.")
 
             if skip_fb:
                 # Guardar feedback vacío para marcar como "omitido"
@@ -103,6 +106,7 @@ try:
     user_id = get_current_user_id()
 
     st.title("Mis Viajes")
+    st.markdown('<div class="tp-breadcrumb">🏠 Dashboard  ›  🧳 Mis Viajes</div>', unsafe_allow_html=True)
     st.divider()
 
     # ─── Barra superior: filtro + nuevo viaje ───
@@ -168,6 +172,8 @@ try:
                 if create_btn:
                     if not nt_name or not nt_dest:
                         st.error("Nombre y destino son obligatorios.")
+                    elif nt_start < date.today():
+                        st.warning("⚠️ La fecha de inicio es en el pasado. ¿Estás planificando un viaje ya realizado?")
                     elif nt_end <= nt_start:
                         st.error("La fecha de fin debe ser posterior a la fecha de inicio.")
                     else:
@@ -187,7 +193,7 @@ try:
                         )
                         st.session_state.active_chat_id = new_chat["chat_id"]
                         st.session_state.user_chats = load_chats(user_id)
-                        st.success(f"Viaje '{nt_name}' creado. Redirigiendo al Chat...")
+                        st.toast(f"🎉 Viaje '{nt_name}' creado correctamente")
                         st.switch_page("pages/2_Chat.py")
 
                 if cancel_btn:

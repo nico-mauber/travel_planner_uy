@@ -3,6 +3,9 @@
 import streamlit as st
 from datetime import date, timedelta
 
+if "trips" not in st.session_state:
+    st.switch_page("app.py")
+
 from config.settings import ItemStatus, TripStatus
 from services.trip_service import (
     get_active_trip, get_trip_by_id, group_items_by_day, accept_suggestion,
@@ -15,6 +18,7 @@ try:
     trips = st.session_state.trips
 
     st.title("Itinerario detallado")
+    st.markdown('<div class="tp-breadcrumb">🏠 Dashboard  ›  📋 Itinerario</div>', unsafe_allow_html=True)
 
     # ─── Selector de viaje ───
     active_statuses = [TripStatus.PLANNING.value, TripStatus.CONFIRMED.value, TripStatus.IN_PROGRESS.value]
@@ -112,14 +116,14 @@ try:
                     if accept_suggestion(trip, action["item_id"]):
                         sync_trip_changes(trips, trip)
                         st.session_state.trips = trips
-                        st.success("Sugerencia aceptada.")
+                        st.toast("✅ Sugerencia aceptada y agregada al plan")
                         st.rerun()
 
                 elif action.get("action") == "discard":
                     if discard_suggestion(trip, action["item_id"]):
                         sync_trip_changes(trips, trip)
                         st.session_state.trips = trips
-                        st.info("Sugerencia descartada.")
+                        st.toast("🗑️ Sugerencia descartada")
                         st.rerun()
 
 except Exception as e:

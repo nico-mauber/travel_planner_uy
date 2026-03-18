@@ -18,7 +18,8 @@
       "WebFetch(domain:python.langchain.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:reference.langchain.com)",
-      "Bash(\"/mnt/c/Users/nmauber/OneDrive - practia.uy/Desktop/Trip_Planner/venv/Scripts/python.exe\" --version 2>&1)"
+      "Bash(\"/mnt/c/Users/nmauber/OneDrive - practia.uy/Desktop/Trip_Planner/venv/Scripts/python.exe\" --version 2>&1)",
+      "Bash(./venv/Scripts/python.exe -c \":*)"
     ]
   },
   "preferences": {

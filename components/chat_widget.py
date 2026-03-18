@@ -155,11 +155,22 @@ def render_hotel_results(data: dict) -> None:
     )
     st.markdown(header_html, unsafe_allow_html=True)
 
-    for i, hotel in enumerate(hotels):
+    # Paginación: mostrar solo los primeros 5 hoteles
+    MAX_HOTELS = 5
+    show_key = f"_show_more_hotels_{id(hotels)}"
+    show_all = st.session_state.get(show_key, False)
+    visible_hotels = hotels if show_all else hotels[:MAX_HOTELS]
+    hidden_count = len(hotels) - MAX_HOTELS
+
+    for i, hotel in enumerate(visible_hotels):
         render_rich_card(hotel)
-        # Separador sutil entre cards (excepto la ultima)
-        if i < len(hotels) - 1:
+        if i < len(visible_hotels) - 1:
             st.markdown('<hr class="tp-hotel-separator">', unsafe_allow_html=True)
+
+    if not show_all and hidden_count > 0:
+        if st.button(f"🏨 Ver {hidden_count} hoteles más", key=show_key, help=f"Mostrar los {hidden_count} hoteles restantes"):
+            st.session_state[show_key] = True
+            st.rerun()
 
     # Credito estilizado
     st.markdown(
