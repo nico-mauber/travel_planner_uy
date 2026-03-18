@@ -175,6 +175,10 @@ def process_message(message: str, trip: Optional[dict] = None,
     if result is not None:
         return result
 
+    # ─── Sin viaje activo y keywords no matchearon: LLM chat como fallback ───
+    if not trip and _USE_LLM and _llm_process_fn:
+        return _llm_chat_response(message, None, user_id, chat_id)
+
     # ─── PATH CON LLM: una sola llamada detecta ALL intents sin keywords ───
     if trip and _llm_extract_fn:
         result = _handle_llm_extraction(message, trip, user_id, chat_id, chat_history=chat_history)
@@ -277,8 +281,9 @@ def _handle_trip_creation_flow(
         }
 
     # ─── Sin draft: detectar intención de crear viaje ───
-    # Con LLM disponible, dejar que el LLM decida (evita falsos positivos por keywords)
-    if _llm_extract_fn:
+    # Con LLM disponible Y viaje activo, dejar que el LLM decida (evita falsos positivos por keywords).
+    # Sin viaje activo (modo creación), usar keywords directamente — el LLM no tiene contexto de trip.
+    if _llm_extract_fn and trip is not None:
         return None
 
     if detect_trip_creation_intent(msg):
