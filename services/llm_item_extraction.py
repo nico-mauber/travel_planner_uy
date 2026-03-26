@@ -1,4 +1,4 @@
-"""Extraccion inteligente de items usando LLM structured output (OpenAI gpt-4.1-nano).
+"""Extraccion inteligente de items usando LLM structured output (OpenAI).
 
 Reemplaza la logica regex de item_extraction.py cuando OPENAI_API_KEY esta disponible.
 Usa ChatOpenAI.with_structured_output() con schema Pydantic para obtener datos

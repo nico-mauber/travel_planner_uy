@@ -1,4 +1,4 @@
-"""Chatbot LLM para Trip Planner — LangGraph + OpenAI (gpt-4.1-nano).
+"""Chatbot LLM para Trip Planner — LangGraph + OpenAI.
 Adaptado del multiuser_chat_system con dominio de viajes."""
 
 import logging

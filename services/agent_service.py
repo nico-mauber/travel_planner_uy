@@ -1,4 +1,4 @@
-"""Servicio del agente — LLM (OpenAI gpt-4.1-nano) + Booking.com. Sin fallback mock."""
+"""Servicio del agente — LLM (OpenAI) + Booking.com. Sin fallback mock."""
 
 import os
 import re
@@ -230,7 +230,7 @@ def process_message(message: str, trip: Optional[dict] = None,
         "type": "text",
         "content": (
             "El asistente IA no esta disponible. "
-            "Configura `OPENAI_API_KEY` en el archivo `.env` para habilitar gpt-5-nano.\n\n"
+            "Contacta al administrador para habilitar el servicio de LLM.\n\n"
             "Mientras tanto, puedes:\n"
             "- Crear viajes desde **Mis Viajes**\n"
             "- Gestionar tu itinerario desde las secciones de la barra lateral"
@@ -980,7 +980,7 @@ def _llm_chat_response(
     message: str, trip: Optional[dict],
     user_id: Optional[str] = None, chat_id: Optional[str] = None,
 ) -> dict:
-    """Envia mensaje al LLM chat (OpenAI gpt-4.1-nano) para respuesta conversacional."""
+    """Envia mensaje al LLM chat para respuesta conversacional."""
     try:
         import streamlit as st
         user_profile = st.session_state.get("user_profile")
