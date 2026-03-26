@@ -135,7 +135,7 @@ def render_rich_card(card_data: dict) -> None:
 
 
 def render_hotel_results(data: dict) -> None:
-    """Renderiza resultados de busqueda de hoteles de Booking.com."""
+    """Renderiza resultados de busqueda de hoteles como cards compactas."""
     text = data.get("text", "")
     hotels = data.get("hotels", [])
 
@@ -146,7 +146,7 @@ def render_hotel_results(data: dict) -> None:
         st.info("No se encontraron hoteles disponibles para las fechas del viaje.")
         return
 
-    # Header con contador y badge Booking.com
+    # Header
     header_html = (
         '<div class="tp-hotel-header">'
         f'  <span class="tp-hotel-header__count">\U0001F3E8 {len(hotels)} hoteles encontrados</span>'
@@ -155,26 +155,181 @@ def render_hotel_results(data: dict) -> None:
     )
     st.markdown(header_html, unsafe_allow_html=True)
 
-    # Paginación: mostrar solo los primeros 5 hoteles
-    MAX_HOTELS = 5
-    show_key = f"_show_more_hotels_{id(hotels)}"
-    show_all = st.session_state.get(show_key, False)
-    visible_hotels = hotels if show_all else hotels[:MAX_HOTELS]
-    hidden_count = len(hotels) - MAX_HOTELS
+    # Renderizar cada hotel como card con thumbnail
+    for h in hotels:
+        name = html_module.escape(str(h.get("name", "Hotel")))
+        location = html_module.escape(str(h.get("location", "")))
+        price = h.get("price", 0)
+        price_str = f"US${price:,.0f}" if price else "\u2014"
+        stars = int(h.get("stars", 0) or 0)
+        stars_html = "\u2B50" * stars if stars else ""
+        review_score = h.get("review_score", 0)
+        review_word = html_module.escape(str(h.get("review_word", "")))
+        review_count = h.get("review_count", 0)
+        checkin_time = html_module.escape(str(h.get("checkin_time", "")))
+        checkout_time = html_module.escape(str(h.get("checkout_time", "")))
+        booking_url = h.get("booking_url", "")
+        photo_url = h.get("photo_url", "")
 
-    for i, hotel in enumerate(visible_hotels):
-        render_rich_card(hotel)
-        if i < len(visible_hotels) - 1:
-            st.markdown('<hr class="tp-hotel-separator">', unsafe_allow_html=True)
+        # Rating badge
+        rating_html = ""
+        if review_score:
+            if review_score >= 8.5:
+                rating_color = "#56D364"
+            elif review_score >= 7.0:
+                rating_color = "#58A6FF"
+            else:
+                rating_color = "#E3B341"
+            count_str = f" ({review_count:,})" if review_count else ""
+            rating_html = (
+                f'<span style="background:{rating_color};color:#000;padding:2px 6px;'
+                f'border-radius:4px;font-weight:700;font-size:0.75rem;">{review_score}</span>'
+                f' <span style="font-size:0.75rem;color:#B8BFC6;">'
+                f'{review_word}{count_str}</span>'
+            )
 
-    if not show_all and hidden_count > 0:
-        if st.button(f"🏨 Ver {hidden_count} hoteles más", key=show_key, help=f"Mostrar los {hidden_count} hoteles restantes"):
-            st.session_state[show_key] = True
-            st.rerun()
+        # Horarios
+        times_parts = []
+        if checkin_time:
+            times_parts.append(f"In {checkin_time}")
+        if checkout_time:
+            times_parts.append(f"Out {checkout_time}")
+        times_str = " \u00B7 ".join(times_parts)
 
-    # Credito estilizado
+        # Layout: foto | info | precio
+        col_img, col_info, col_price = st.columns([0.18, 0.55, 0.27])
+
+        with col_img:
+            if photo_url:
+                st.image(photo_url, use_container_width=True)
+            else:
+                st.markdown(
+                    '<div style="background:#242D35;border-radius:8px;height:80px;'
+                    'display:flex;align-items:center;justify-content:center;'
+                    'font-size:2rem;">\U0001F3E8</div>',
+                    unsafe_allow_html=True,
+                )
+
+        with col_info:
+            info_html = (
+                f'<div style="font-weight:600;font-size:0.95rem;color:#F0F2F4;'
+                f'margin-bottom:2px;">{name} {stars_html}</div>'
+                f'<div style="font-size:0.8rem;color:#B8BFC6;margin-bottom:4px;">'
+                f'\U0001F4CD {location}</div>'
+                f'<div style="margin-bottom:2px;">{rating_html}</div>'
+            )
+            if times_str:
+                info_html += (
+                    f'<div style="font-size:0.7rem;color:#8B949E;">{times_str}</div>'
+                )
+            st.markdown(info_html, unsafe_allow_html=True)
+
+        with col_price:
+            price_html = (
+                f'<div style="text-align:right;padding-top:4px;">'
+                f'<div style="font-size:1.15rem;font-weight:700;color:#56D364;'
+                f'margin-bottom:6px;">{price_str}</div>'
+            )
+            st.markdown(price_html, unsafe_allow_html=True)
+            if booking_url:
+                st.link_button("Ver en Booking", booking_url, use_container_width=True)
+
+        # Separador sutil
+        st.markdown(
+            '<hr style="border:none;border-top:1px solid #373E47;margin:4px 0 8px 0;">',
+            unsafe_allow_html=True,
+        )
+
+    # Crédito
     st.markdown(
-        '<div class="tp-hotel-credit">Datos proporcionados por Booking.com via RapidAPI</div>',
+        '<div class="tp-hotel-credit">Datos de Booking.com</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_flight_results(data: dict) -> None:
+    """Renderiza resultados de busqueda de vuelos como tabla compacta."""
+    text = data.get("text", "")
+    flights = data.get("flights", [])
+
+    if text:
+        st.markdown(text)
+
+    if not flights:
+        st.info("No se encontraron vuelos disponibles para las fechas del viaje.")
+        return
+
+    # Header
+    header_html = (
+        '<div class="tp-hotel-header">'
+        f'  <span class="tp-hotel-header__count">\u2708\uFE0F {len(flights)} vuelos encontrados</span>'
+        '  <span class="tp-hotel-header__badge">Google Flights</span>'
+        '</div>'
+    )
+    st.markdown(header_html, unsafe_allow_html=True)
+
+    # Construir tabla HTML compacta
+    rows_html = ""
+    for f in flights:
+        airline = html_module.escape(str(f.get("provider", "") or f.get("name", "\u2014")))
+        departure = html_module.escape(str(f.get("departure", "\u2014")))
+        arrival = html_module.escape(str(f.get("arrival", "\u2014")))
+        duration = html_module.escape(str(f.get("duration", "\u2014")))
+        notes = html_module.escape(str(f.get("notes", "")))
+        price = f.get("price", 0)
+        price_str = f"US${price:,.0f}" if price else "\u2014"
+        booking_url = f.get("booking_url", "")
+
+        # Extraer solo hora de datetime strings como "2026-04-15 10:10"
+        if len(departure) > 5 and " " in departure:
+            departure = departure.split(" ")[-1][:5]
+        if len(arrival) > 5 and " " in arrival:
+            arrival = arrival.split(" ")[-1][:5]
+
+        # Escalas compactas
+        stops_raw = notes.split("|")[0].strip() if notes else ""
+
+        link_html = ""
+        if booking_url:
+            safe_url = html_module.escape(booking_url)
+            link_html = f'<a href="{safe_url}" target="_blank" rel="noopener" style="color:var(--tp-accent-blue, #58A6FF);text-decoration:none;">\U0001F517</a>'
+
+        rows_html += (
+            "<tr>"
+            f'<td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--tp-border, #30363d);white-space:nowrap;font-weight:500;">{airline}</td>'
+            f'<td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--tp-border, #30363d);white-space:nowrap;">{departure}</td>'
+            f'<td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--tp-border, #30363d);white-space:nowrap;">{arrival}</td>'
+            f'<td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--tp-border, #30363d);white-space:nowrap;">{duration}</td>'
+            f'<td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--tp-border, #30363d);font-weight:600;color:var(--tp-accent-green, #56D364);white-space:nowrap;">{price_str}</td>'
+            f'<td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--tp-border, #30363d);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.8rem;color:var(--tp-text-secondary, #8B949E);">{stops_raw}</td>'
+            f'<td style="padding:0.4rem 0.3rem;border-bottom:1px solid var(--tp-border, #30363d);">{link_html}</td>'
+            "</tr>"
+        )
+
+    table_html = (
+        '<div style="overflow-x:auto;margin:0.5rem 0;">'
+        '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">'
+        '<thead>'
+        '<tr style="border-bottom:1px solid var(--tp-border, #30363d);text-align:left;">'
+        '<th style="padding:0.4rem 0.6rem;color:var(--tp-text-secondary, #8B949E);font-weight:500;">Aerol\u00EDnea</th>'
+        '<th style="padding:0.4rem 0.6rem;color:var(--tp-text-secondary, #8B949E);font-weight:500;">Salida</th>'
+        '<th style="padding:0.4rem 0.6rem;color:var(--tp-text-secondary, #8B949E);font-weight:500;">Llegada</th>'
+        '<th style="padding:0.4rem 0.6rem;color:var(--tp-text-secondary, #8B949E);font-weight:500;">Duraci\u00F3n</th>'
+        '<th style="padding:0.4rem 0.6rem;color:var(--tp-text-secondary, #8B949E);font-weight:500;">Precio</th>'
+        '<th style="padding:0.4rem 0.6rem;color:var(--tp-text-secondary, #8B949E);font-weight:500;">Escalas</th>'
+        '<th style="padding:0.4rem 0.3rem;"></th>'
+        '</tr>'
+        '</thead>'
+        f'<tbody style="color:var(--tp-text-primary, #E6EDF3);">{rows_html}</tbody>'
+        '</table>'
+        '</div>'
+    )
+
+    st.markdown(table_html, unsafe_allow_html=True)
+
+    # Credito
+    st.markdown(
+        '<div class="tp-hotel-credit">Datos de Google Flights</div>',
         unsafe_allow_html=True,
     )
 

@@ -8,7 +8,7 @@ LLM_DATA_DIR = os.path.join(BASE_DIR, "data", "llm_data")
 os.makedirs(LLM_DATA_DIR, exist_ok=True)
 
 # Configuración del modelo
-DEFAULT_MODEL = "gpt-4.1-nano"
+DEFAULT_MODEL = "gpt-5-nano"
 DEFAULT_TEMPERATURE = 0.7
 EXTRACTION_TEMPERATURE = 0  # Temperatura 0 para extraccion determinista
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"

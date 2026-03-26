@@ -48,6 +48,7 @@ En `.env` (cargado con `load_dotenv(override=True)` al inicio de `app.py` — `o
 | `OPENAI_PROJECT` | No | Project ID de OpenAI (usado automaticamente por el SDK) |
 | `RAPIDAPI_KEY` | No | Habilita busqueda de hoteles reales via Booking.com (DataCrawler) |
 | `RAPIDAPI_BOOKING_HOST` | No | Host de la API (default: `booking-com15.p.rapidapi.com`) |
+| `SERPAPI_KEY` | No | Habilita busqueda de vuelos via SerpAPI Google Flights (backend primario estable). Sin ella, usa fast-flights (scraper directo) como fallback |
 
 OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Google (ver `secrets.toml.example`).
 
@@ -60,7 +61,7 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 ### Capas
 
 - **`app.py`** — Punto de entrada. Configura `st.set_page_config(layout="wide")`, inyecta CSS global, ejecuta guard de autenticacion, inicializa `session_state`, sincroniza `active_trip_id` desde `chat_selected_trip_id`, configura `st.navigation()` con 7 paginas, renderiza sidebar con viaje activo. Carga `.env` con `load_dotenv()` al inicio.
-- **`services/`** — Logica de negocio pura (sin Streamlit). 15 servicios (ver seccion Servicios).
+- **`services/`** — Logica de negocio pura (sin Streamlit). 16 servicios (ver seccion Servicios).
 - **`pages/`** — 7 paginas Streamlit. Dashboard, Itinerario y Presupuesto tienen selector de viaje propio. Cronograma muestra todos los viajes. Chat tiene selector obligatorio.
 - **`components/`** — 5 widgets reutilizables que reciben datos y retornan acciones del usuario como dicts (ej: `{"action": "accept", "item_id": "..."}`).
 - **`config/`** — `settings.py` (Enums, paletas de colores, iconos, labels en espanol, `DEMO_USER_ID`) y `llm_config.py` (modelo OpenAI `gpt-4.1-nano`, temperaturas para chat y extraccion, embeddings).
@@ -84,7 +85,9 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 | `llm_chatbot.py` | `TripChatbot` (singleton). Pipeline LangGraph de 4 nodos: memory_retrieval -> context_optimization -> response_generation -> memory_extraction |
 | `memory_manager.py` | `TripMemoryManager`. ChromaDB para memorias vectoriales (importancia >= 2), SQLite para checkpoints LangGraph. Datos en `data/llm_data/` |
 | `booking_service.py` | Cliente Booking.com via RapidAPI (DataCrawler). Cache en memoria (1h TTL) |
-| `budget_service.py` | Calculo de resumen de presupuesto por categoria. Excluye items sugeridos |
+| `flight_service.py` | Busqueda de vuelos. Dual backend: SerpAPI Google Flights (primario, requiere `SERPAPI_KEY`) + fast-flights (fallback scraper, sin API key). Cache en memoria (30 min TTL). Funciones: `search_flights()`, `search_flights_for_trip()`, `format_flights_as_cards()`, `get_airport_code()`, `is_flights_available()` |
+| `expense_service.py` | CRUD de gastos directos (`expenses`) no asociados a items del itinerario. Funciones: `load_expenses()`, `add_expense()`, `update_expense()`, `remove_expense()`, `format_existing_expenses()`. IDs con formato `exp-{hex8}` |
+| `budget_service.py` | Calculo de resumen de presupuesto por categoria. Acepta `items` y `expenses` (gastos directos). Excluye items sugeridos. Retorna `total_estimated`, `total_real`, `total_expenses`, `by_category` |
 | `profile_service.py` | Preferencias de usuario. Persistencia en Supabase |
 | `feedback_service.py` | Retroalimentacion post-viaje. Rating general + por item. Persistencia en Supabase |
 | `weather_service.py` | Clima mock hardcodeado para algunos destinos. Default generico |
@@ -113,7 +116,7 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 
 ### Modelos de datos
 
-Los viajes e items son **dicts planos** a lo largo de toda la app. Un item se anida dentro de `trip["items"]` (lista de dicts). Items multi-dia tienen campo `end_day` (opcional, >= `day`). Los dataclasses en `models/` existen como referencia pero no se instancian en runtime.
+Los viajes e items son **dicts planos** a lo largo de toda la app. Un item se anida dentro de `trip["items"]` (lista de dicts). Los gastos directos en `trip["expenses"]` (lista de dicts). Items multi-dia tienen campo `end_day` (opcional, >= `day`). Los dataclasses en `models/` existen como referencia pero no se instancian en runtime.
 
 ### Persistencia (Supabase)
 
@@ -125,13 +128,15 @@ Tablas en Supabase (PostgreSQL):
 | `profiles` | Preferencias del usuario | `user_id` (FK a users) |
 | `trips` | Viajes | `id` (TEXT, formato `trip-{hex8}`) |
 | `itinerary_items` | Items del itinerario (incluye `end_day` para multi-dia) | `id` (TEXT, formato `item-{hex8}`) |
+| `expenses` | Gastos directos no asociados a items | `id` (TEXT, formato `exp-{hex8}`) |
 | `chats` | Conversaciones | `chat_id` (TEXT) |
 | `chat_messages` | Mensajes de chat | `id` (UUID auto) |
 | `feedbacks` | Feedback post-viaje | `trip_id` (FK a trips, UNIQUE) |
 
-- Schema en `scripts/schema.sql` (ejecutar en Supabase SQL Editor)
-- Migracion `scripts/migration_cf002_end_day.sql` agrega campo `end_day` a `itinerary_items`
-- Trigger `trg_recalc_budget` recalcula `trips.budget_total` automaticamente al modificar items
+- Schema unificado en `scripts/setup_database.sql` (transaccional e idempotente — ejecutar en Supabase SQL Editor)
+- Trigger `trg_recalc_budget` recalcula `trips.budget_total` al modificar `itinerary_items` (excluye sugeridos)
+- Trigger `trg_recalc_budget_expenses` recalcula `trips.budget_total` al modificar `expenses`
+- `budget_total` = SUM(items.cost_estimated donde status != 'sugerido') + SUM(expenses.amount)
 - RLS habilitado; service_role key bypasea RLS por defecto
 - Datos LLM (ChromaDB + checkpoints) en `data/llm_data/` (local)
 
@@ -199,6 +204,14 @@ Tablas en Supabase (PostgreSQL):
 **Busqueda de hoteles (Booking.com):**
 - `booking_service.py` — Cliente HTTP (httpx) contra RapidAPI DataCrawler.
 - Flujo: `search_destinations(query)` -> `search_hotels(dest_id, checkin, checkout)` -> `format_hotels_as_cards()`.
+
+**Busqueda de vuelos (SerpAPI + Google Flights fallback):**
+- `flight_service.py` — Dual backend: SerpAPI Google Flights (primario, requiere `SERPAPI_KEY`) + fast-flights (fallback scraper, sin API key).
+- Flujo: `search_flights(origin, destination, date)` -> `format_flights_as_cards()`.
+- `search_flights_for_trip(trip)` usa destino y fechas del viaje activo. Necesita ciudad de origen del usuario.
+- `get_airport_code(city_name)` mapea ciudades a codigos IATA (169 ciudades de Latam, Europa, NA, Asia, Africa).
+- Intent `flight_search` en el dispatcher: detectado por LLM semanticamente o por keywords (`_FLIGHT_KEYWORDS`).
+- Renderizado: `render_flight_results()` en chat_widget.py como tabla compacta HTML.
 - Cache en memoria con TTL de 1 hora. Si `RAPIDAPI_KEY` no esta configurada, retorna listas vacias.
 
 **MCP Server:**
@@ -222,7 +235,7 @@ Tablas en Supabase (PostgreSQL):
 ## Convenciones
 
 - Viajes y items son **dicts**, no objetos tipados, a lo largo de toda la app
-- IDs usan formato `trip-{hex8}` / `item-{hex8}` / `chat-{hex8}` / `user-{hex8}` generados con `uuid.uuid4().hex[:8]`
+- IDs usan formato `trip-{hex8}` / `item-{hex8}` / `exp-{hex8}` / `chat-{hex8}` / `user-{hex8}` generados con `uuid.uuid4().hex[:8]`
 - Fechas como strings ISO `"YYYY-MM-DD"`, horas como `"HH:MM"`
 - Items usan `day` (int, 1-based) para posicion temporal relativa al inicio del viaje. `end_day` (int, opcional) para items multi-dia
 - Enums en `config/settings.py` usan valores en espanol (`"en_planificacion"`, `"confirmado"`, `"sugerido"`, etc.)
@@ -243,7 +256,8 @@ Tablas en Supabase (PostgreSQL):
 | `python-dotenv>=1.0.0` | Carga de `.env` |
 | `langchain-openai`, `langgraph`, `langgraph-checkpoint-sqlite` | Pipeline LLM con OpenAI gpt-4.1-nano |
 | `langchain-chroma`, `chromadb` | Memoria vectorial |
-| `httpx>=0.25.0` | Cliente HTTP para Booking.com API |
+| `httpx>=0.25.0` | Cliente HTTP para Booking.com API y SerpAPI fallback |
+| `fast-flights>=2.2.0` | Scraper de Google Flights (fallback de busqueda de vuelos sin API key) |
 | `mcp[cli]>=1.2.0` | Servidor MCP (FastMCP) |
 | `supabase>=2.0.0` | Cliente Supabase (persistencia PostgreSQL) |
 | `pydantic>=2.0.0` | Modelos estructurados (memoria LLM + schema `ItemExtractionResult` para structured output) |
