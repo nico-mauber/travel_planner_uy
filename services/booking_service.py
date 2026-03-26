@@ -347,6 +347,10 @@ def format_hotels_as_cards(hotels: list[dict]) -> list[dict]:
             notes_parts.append(f"Check-out hasta {h['checkout_time']}")
         notes = " | ".join(notes_parts)
 
+        # Construir URL de Booking.com para el hotel
+        hotel_id = h.get("hotel_id", "")
+        booking_url = f"https://www.booking.com/hotel/x/{hotel_id}.html" if hotel_id else ""
+
         cards.append({
             "card_type": "hotel",
             "name": h["name"],
@@ -356,6 +360,13 @@ def format_hotels_as_cards(hotels: list[dict]) -> list[dict]:
             "rating": rating or None,
             "notes": notes,
             "photo_url": h.get("photo_url", ""),
+            "booking_url": booking_url,
+            "stars": h.get("stars", 0),
+            "review_score": h.get("review_score", 0),
+            "review_word": h.get("review_word", ""),
+            "review_count": h.get("review_count", 0),
+            "checkin_time": h.get("checkin_time", ""),
+            "checkout_time": h.get("checkout_time", ""),
         })
     return cards
 

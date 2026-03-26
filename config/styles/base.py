@@ -876,6 +876,147 @@ hr {
   margin-bottom: var(--tp-space-2);
 }
 
+/* ═══════════════════════════════════════════
+   CHAT — Rediseno premium
+   ═══════════════════════════════════════════ */
+
+/* Header compacto: selector de viaje + badges */
+.tp-chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--tp-space-3) var(--tp-space-4);
+    background: var(--tp-bg-secondary);
+    border-radius: var(--tp-radius-lg);
+    border: 1px solid var(--tp-border-default);
+    margin-bottom: var(--tp-space-4);
+    gap: var(--tp-space-4);
+}
+.tp-chat-header__info {
+    display: flex;
+    align-items: center;
+    gap: var(--tp-space-3);
+    flex: 1;
+    min-width: 0;
+}
+.tp-chat-header__destination {
+    font-size: var(--tp-text-lg);
+    font-weight: 600;
+    color: var(--tp-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tp-chat-header__dates {
+    font-size: var(--tp-text-xs);
+    color: var(--tp-text-muted);
+    white-space: nowrap;
+}
+.tp-chat-header__badges {
+    display: flex;
+    gap: var(--tp-space-2);
+    flex-shrink: 0;
+}
+
+/* Welcome screen premium */
+.tp-chat-welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: var(--tp-space-12) var(--tp-space-6);
+    min-height: 400px;
+}
+.tp-chat-welcome__icon {
+    font-size: 4rem;
+    margin-bottom: var(--tp-space-4);
+    filter: drop-shadow(0 4px 12px rgba(88, 166, 255, 0.3));
+}
+.tp-chat-welcome__title {
+    font-size: var(--tp-text-2xl);
+    font-weight: 700;
+    color: var(--tp-text-primary);
+    margin-bottom: var(--tp-space-2);
+    letter-spacing: -0.02em;
+}
+.tp-chat-welcome__subtitle {
+    font-size: var(--tp-text-base);
+    color: var(--tp-text-secondary);
+    margin-bottom: var(--tp-space-2);
+}
+.tp-chat-welcome__trip-info {
+    font-size: var(--tp-text-sm);
+    color: var(--tp-text-muted);
+    margin-bottom: var(--tp-space-8);
+}
+.tp-chat-welcome__actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--tp-space-3);
+    width: 100%;
+    max-width: 520px;
+}
+.tp-chat-welcome__action {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--tp-space-2);
+    padding: var(--tp-space-4) var(--tp-space-3);
+    background: var(--tp-bg-secondary);
+    border: 1px solid var(--tp-border-default);
+    border-radius: var(--tp-radius-lg);
+    cursor: pointer;
+    transition: all var(--tp-transition-fast);
+    text-decoration: none;
+    color: var(--tp-text-primary);
+}
+.tp-chat-welcome__action:hover {
+    background: var(--tp-bg-tertiary);
+    border-color: var(--tp-accent-blue);
+    transform: translateY(-2px);
+    box-shadow: var(--tp-shadow-md);
+}
+.tp-chat-welcome__action-icon {
+    font-size: var(--tp-text-2xl);
+}
+.tp-chat-welcome__action-label {
+    font-size: var(--tp-text-sm);
+    font-weight: 500;
+    color: var(--tp-text-secondary);
+}
+
+/* Chat sidebar conversations */
+.tp-chat-sidebar-title {
+    font-size: var(--tp-text-sm);
+    font-weight: 600;
+    color: var(--tp-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: var(--tp-space-2) 0;
+    margin-bottom: var(--tp-space-2);
+}
+.tp-chat-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--tp-space-2) var(--tp-space-3);
+    border-radius: var(--tp-radius-md);
+    margin-bottom: var(--tp-space-1);
+    cursor: pointer;
+    transition: background var(--tp-transition-fast);
+    font-size: var(--tp-text-sm);
+    color: var(--tp-text-secondary);
+}
+.tp-chat-list-item:hover {
+    background: var(--tp-bg-tertiary);
+}
+.tp-chat-list-item--active {
+    background: var(--tp-bg-tertiary);
+    color: var(--tp-text-primary);
+    border-left: 3px solid var(--tp-accent-blue);
+}
+
 /* ==========================================================================
    REDUCED MOTION — Desactivar todas las animaciones
    ========================================================================== */

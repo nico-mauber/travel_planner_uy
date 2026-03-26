@@ -68,6 +68,14 @@ _HOTEL_KEYWORDS = [
     "booking", "alojarnos", "hospedarnos",
 ]
 
+# ─── Keywords de busqueda de vuelos (fallback sin LLM) ───
+_FLIGHT_KEYWORDS = [
+    "vuelo", "vuelos", "pasaje", "pasajes", "avion", "avión",
+    "aerolinea", "aerolínea", "volar", "buscar vuelo",
+    "boleto aereo", "boleto aéreo", "ticket aereo",
+    "precio de vuelo", "precios de vuelos",
+]
+
 # ─── Keywords de eliminar item (fallback sin LLM) ───
 _REMOVE_KEYWORDS = ["eliminar", "quitar", "elimina", "quita", "borrar"]
 
@@ -110,6 +118,12 @@ def detect_hotel_intent(msg: str) -> bool:
     """Detecta si el mensaje tiene intencion de buscar hoteles (fallback sin LLM)."""
     lower = msg.lower().strip()
     return any(kw in lower for kw in _HOTEL_KEYWORDS)
+
+
+def detect_flight_intent(msg: str) -> bool:
+    """Detecta si el mensaje pide buscar vuelos."""
+    lower = msg.lower()
+    return any(kw in lower for kw in _FLIGHT_KEYWORDS)
 
 
 def detect_remove_item_intent(msg: str) -> bool:

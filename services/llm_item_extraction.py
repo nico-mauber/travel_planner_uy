@@ -1,4 +1,4 @@
-"""Extraccion inteligente de items usando LLM structured output (OpenAI gpt-4.1-nano).
+"""Extraccion inteligente de items usando LLM structured output (OpenAI).
 
 Reemplaza la logica regex de item_extraction.py cuando OPENAI_API_KEY esta disponible.
 Usa ChatOpenAI.with_structured_output() con schema Pydantic para obtener datos
@@ -29,6 +29,7 @@ class ItemExtractionResult(BaseModel):
             "'calendar_event' (agregar viaje completo al cronograma/calendario), "
             "'remove_item' (eliminar item existente), "
             "'hotel_search' (buscar hoteles/hospedaje — NO es agregar item tipo alojamiento), "
+            "'flight_search' (buscar vuelos/pasajes/avion — NO es agregar item tipo vuelo con datos concretos), "
             "'informative' (pregunta informativa, no modifica itinerario), "
             "'unknown' (no se puede determinar)"
         )
@@ -171,6 +172,7 @@ INSTRUCCIONES:
    - "calendar_event": el usuario quiere agregar el viaje completo como bloque al cronograma o calendario (no un item individual, sino el viaje entero como evento)
    - "remove_item": el usuario quiere eliminar o quitar uno, varios o TODOS los items existentes del itinerario. Analiza cuales items matchean con lo que pide el usuario
    - "hotel_search": el usuario quiere explorar opciones de hospedaje — buscar hoteles, ver donde dormir. Esto NO es agregar un item tipo alojamiento con datos concretos
+   - "flight_search": el usuario quiere buscar vuelos, pasajes de avion, comparar precios de vuelos, ver opciones de aerolineas. Esto NO es agregar un item tipo vuelo con datos concretos de dia y hora
    - "add_expense": el usuario quiere registrar un gasto/costo al presupuesto del viaje que NO es un item del itinerario. Ej: "me compré los pasajes por 500 dólares", "pagué el seguro de viaje", "gasté 200 en souvenirs"
    - "modify_expense": el usuario quiere cambiar el monto, nombre o categoría de un gasto ya registrado
    - "remove_expense": el usuario quiere eliminar un gasto registrado del presupuesto
@@ -182,9 +184,13 @@ REGLA DE PRIORIDAD (aplicar ANTES de cualquier otra):
 - Ejemplo: "quiero ir a pasear por la rambla el primer dia a las 7am" → add_item (tiene dia + hora + actividad concreta)
 - Solo es create_trip si habla UNICAMENTE de un destino de viaje (pais/ciudad) sin NINGUN dato temporal
 
-SOBRE REFERENCIAS AL HISTORIAL:
-- Si el usuario referencia algo discutido antes ("agrega lo que te dije", "el paseo que mencionamos"), revisa los mensajes previos del historial para recuperar nombre, dia, hora y otros datos
-- Los datos mencionados en mensajes anteriores son validos para extraer
+REGLA CRITICA — CLASIFICACION INDEPENDIENTE:
+- Clasifica SIEMPRE el intent basandote UNICAMENTE en el ULTIMO mensaje del usuario (el mensaje actual)
+- El historial de chat sirve SOLO para recuperar datos concretos (nombres, dias, horas) si el usuario hace referencia ("lo que te dije", "el paseo que mencionamos")
+- NUNCA dejes que el tema de mensajes anteriores influya en la clasificacion del intent actual
+- Si el historial habla de vuelos pero el usuario ahora pregunta por hoteles → hotel_search (NO flight_search)
+- Si el historial habla de hoteles pero el usuario ahora quiere agregar una cena → add_item (NO hotel_search)
+- Cada mensaje se clasifica POR SU PROPIO CONTENIDO SEMANTICO, independientemente del contexto previo
 
 IMPORTANTE sobre create_trip vs add_item:
 - Si el mensaje contiene indicadores de dia/hora/posicion en itinerario → add_item (es un item concreto para el viaje actual)
@@ -197,6 +203,10 @@ IMPORTANTE sobre create_trip vs add_item:
 IMPORTANTE sobre hotel_search vs add_item:
 - Quiere explorar opciones de hospedaje sin datos concretos → hotel_search
 - Quiere agregar un alojamiento especifico con datos concretos (nombre, dia, hora) → add_item
+
+IMPORTANTE sobre flight_search vs add_item:
+- Quiere buscar/explorar/comparar vuelos sin datos concretos de dia/hora en el itinerario → flight_search
+- Quiere agregar un vuelo especifico con dia, hora, aerolinea concretos al itinerario → add_item
 
 IMPORTANTE sobre add_expense vs add_item:
 - Si el usuario habla de un GASTO o COSTO sin datos de itinerario (dia, hora) → add_expense (es un costo para el presupuesto)
@@ -354,7 +364,7 @@ def _calculate_total_days(trip: dict) -> int:
 # ─── Post-validacion defensiva ───
 
 _TIME_FORMAT = re.compile(r"^\d{2}:\d{2}$")
-_VALID_INTENTS = {"add_item", "create_trip", "calendar_event", "remove_item", "hotel_search", "add_expense", "modify_expense", "remove_expense", "informative", "unknown"}
+_VALID_INTENTS = {"add_item", "create_trip", "calendar_event", "remove_item", "hotel_search", "flight_search", "add_expense", "modify_expense", "remove_expense", "informative", "unknown"}
 _VALID_ITEM_TYPES = {"actividad", "comida", "vuelo", "traslado", "alojamiento", "extra"}
 
 

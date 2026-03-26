@@ -1,4 +1,4 @@
-"""Servicio del agente — LLM (OpenAI gpt-4.1-nano) + Booking.com. Sin fallback mock."""
+"""Servicio del agente — LLM (OpenAI) + Booking.com. Sin fallback mock."""
 
 import os
 import re
@@ -18,7 +18,7 @@ from services.item_extraction import (
     detect_time_conflict, build_item_confirmation_data,
     new_item_draft, calculate_end_time,
     detect_cancel_intent as detect_item_cancel_intent,
-    detect_calendar_intent, detect_hotel_intent, detect_remove_item_intent,
+    detect_calendar_intent, detect_hotel_intent, detect_flight_intent, detect_remove_item_intent,
     _ORDINAL_NAMES,
 )
 
@@ -67,6 +67,15 @@ try:
 except ImportError:
     pass
 
+# ─── Detectar si búsqueda de vuelos está disponible ───
+_USE_FLIGHTS = False
+try:
+    from services.flight_service import (
+        is_flights_available, search_flights_for_trip, format_flights_as_cards,
+    )
+    _USE_FLIGHTS = is_flights_available()
+except ImportError:
+    pass
 
 
 # ─── Patrones de prompt injection a sanitizar ───
@@ -108,6 +117,11 @@ def is_llm_active() -> bool:
 def is_booking_active() -> bool:
     """Retorna True si Booking.com está disponible."""
     return _USE_BOOKING
+
+
+def is_flights_active() -> bool:
+    """Retorna True si la búsqueda de vuelos está disponible."""
+    return _USE_FLIGHTS
 
 
 # ─── Constantes compiladas para deteccion de preguntas informativas ───
@@ -204,6 +218,11 @@ def process_message(message: str, trip: Optional[dict] = None,
             result = _hotel_search_response(message, trip, user_id, chat_id)
             if result is not None:
                 return result
+        # Busqueda de vuelos
+        if _USE_FLIGHTS and detect_flight_intent(msg):
+            result = _flight_search_response(message, trip, user_id, chat_id)
+            if result is not None:
+                return result
 
     # ─── Sin LLM configurado ───
     return {
@@ -211,7 +230,7 @@ def process_message(message: str, trip: Optional[dict] = None,
         "type": "text",
         "content": (
             "El asistente IA no esta disponible. "
-            "Configura `OPENAI_API_KEY` en el archivo `.env` para habilitar gpt-4.1-nano.\n\n"
+            "Contacta al administrador para habilitar el servicio de LLM.\n\n"
             "Mientras tanto, puedes:\n"
             "- Crear viajes desde **Mis Viajes**\n"
             "- Gestionar tu itinerario desde las secciones de la barra lateral"
@@ -497,6 +516,11 @@ def _handle_llm_extraction(
         if _USE_BOOKING:
             return _hotel_search_response(message, trip, user_id, chat_id)
         # Sin Booking → fall through al LLM chat para respuesta informativa
+        return None
+
+    if result.intent == "flight_search":
+        if _USE_FLIGHTS:
+            return _flight_search_response(message, trip, user_id, chat_id)
         return None
 
     if result.intent == "add_expense":
@@ -863,29 +887,15 @@ def _hotel_search_response(
             return None
 
         cards = format_hotels_as_cards(hotels)
-        # Obtener respuesta contextual del LLM si esta disponible
-        llm_text = ""
-        if _USE_LLM and _llm_process_fn:
-            try:
-                import streamlit as st
-                user_profile = st.session_state.get("user_profile")
-                llm_resp = _llm_process_fn(
-                    message, trip, user_profile,
-                    user_id=user_id, chat_id=chat_id,
-                )
-                llm_text = llm_resp.get("content", "")
-            except Exception:
-                pass
 
         dest = trip.get("destination", "tu destino")
         return {
             "role": "assistant",
             "type": "hotel_results",
             "content": {
-                "text": llm_text or (
-                    f"Encontre estos hoteles en **{dest}** "
-                    f"para tus fechas ({trip.get('start_date', '')} — "
-                    f"{trip.get('end_date', '')}):"
+                "text": (
+                    f"Hoteles en **{dest}** "
+                    f"({trip.get('start_date', '')} — {trip.get('end_date', '')}):"
                 ),
                 "hotels": cards,
             },
@@ -895,11 +905,82 @@ def _hotel_search_response(
         return None
 
 
+def _extract_origin_from_message(message: str) -> str:
+    """Extrae la ciudad de origen de un mensaje como 'vuelos desde Buenos Aires'.
+
+    Busca patrones como: 'desde X', 'de X a', 'saliendo de X'.
+    Retorna la ciudad encontrada o cadena vacia.
+    """
+    lower = message.lower().strip()
+    # Patrones para extraer origen
+    patterns = [
+        re.compile(r'(?:desde|saliendo de|partiendo de|sale de|salgo de)\s+([A-Za-záéíóúñÁÉÍÓÚÑüÜ\s]+?)(?:\s+(?:a|hacia|para|al?)\s+|$)', re.IGNORECASE),
+        re.compile(r'(?:de)\s+([A-Za-záéíóúñÁÉÍÓÚÑüÜ\s]+?)\s+(?:a|hacia|para)\s+', re.IGNORECASE),
+    ]
+    for pat in patterns:
+        m = pat.search(lower)
+        if m:
+            origin = m.group(1).strip().rstrip(".,;:!?")
+            if len(origin) >= 2:
+                return origin
+    return ""
+
+
+def _flight_search_response(
+    message: str, trip: dict,
+    user_id: Optional[str] = None, chat_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Busca vuelos via Google Flights y retorna resultados formateados."""
+    try:
+        # Extraer ciudad de origen del mensaje del usuario
+        origin = _extract_origin_from_message(message)
+        flights = search_flights_for_trip(trip, origin=origin, max_results=5)
+        if not flights:
+            return {
+                "role": "assistant",
+                "type": "text",
+                "content": (
+                    "No encontre vuelos para tu viaje. "
+                    "Para buscar vuelos necesito saber tu **ciudad de origen**. "
+                    "Por ejemplo: _busca vuelos desde Buenos Aires_ o _vuelos desde Montevideo_."
+                ),
+            }
+
+        cards = format_flights_as_cards(flights)
+
+        dest = trip.get("destination", "tu destino")
+        origin_display = origin.title() if origin else "tu origen"
+        source = flights[0].get("_source", "") if flights else ""
+        source_label = "SerpAPI" if source == "serpapi" else "Google Flights"
+        return {
+            "role": "assistant",
+            "type": "flight_results",
+            "content": {
+                "text": (
+                    f"Vuelos de **{origin_display}** a **{dest}** "
+                    f"({trip.get('start_date', '')} — {trip.get('end_date', '')}):"
+                ),
+                "flights": cards,
+            },
+        }
+    except Exception as e:
+        logger.warning("Error en busqueda de vuelos: %s", e)
+        return {
+            "role": "assistant",
+            "type": "text",
+            "content": (
+                "Hubo un error al buscar vuelos. "
+                "Google Flights puede estar temporalmente no disponible. "
+                "Intenta de nuevo en unos segundos."
+            ),
+        }
+
+
 def _llm_chat_response(
     message: str, trip: Optional[dict],
     user_id: Optional[str] = None, chat_id: Optional[str] = None,
 ) -> dict:
-    """Envia mensaje al LLM chat (OpenAI gpt-4.1-nano) para respuesta conversacional."""
+    """Envia mensaje al LLM chat para respuesta conversacional."""
     try:
         import streamlit as st
         user_profile = st.session_state.get("user_profile")
