@@ -937,26 +937,42 @@ def _flight_search_response(
 ) -> Optional[dict]:
     """Busca vuelos con datos extraidos del LLM."""
     try:
-        # Datos del LLM result (sin regex)
+        # Datos del LLM result
         origin = ""
         destination_city = ""
+        origin_iata = ""
+        dest_iata = ""
         limit = 5
         if llm_result:
             origin = llm_result.flight_origin or ""
             destination_city = getattr(llm_result, "flight_destination", "") or ""
+            origin_iata = getattr(llm_result, "flight_origin_iata", "") or ""
+            dest_iata = getattr(llm_result, "flight_destination_iata", "") or ""
             limit = llm_result.result_count or 5
-        logger.info("    [flight_search] origin=%s, destination_city=%s, limit=%s",
-                    origin, destination_city, limit)
+        logger.info("    [flight_search] origin=%s (%s), dest_city=%s (%s), limit=%s",
+                    origin, origin_iata, destination_city, dest_iata, limit)
 
         flights = search_flights_for_trip(
-            trip, origin=origin, destination_city=destination_city, max_results=limit,
+            trip, origin=origin, destination_city=destination_city,
+            origin_iata=origin_iata, dest_iata=dest_iata,
+            max_results=limit,
         )
         if not flights:
+            if origin:
+                dest = trip.get("destination", "tu destino")
+                return {
+                    "role": "assistant",
+                    "type": "text",
+                    "content": (
+                        f"No encontre vuelos de **{origin.title()}** a **{dest}** para esas fechas. "
+                        "Google Flights no tiene resultados para esta ruta. "
+                        "Intenta con otra ciudad de origen o fechas diferentes."
+                    ),
+                }
             return {
                 "role": "assistant",
                 "type": "text",
                 "content": (
-                    "No encontre vuelos para tu viaje. "
                     "Para buscar vuelos necesito saber tu **ciudad de origen**. "
                     "Por ejemplo: _busca vuelos desde Buenos Aires_ o _vuelos desde Montevideo_."
                 ),

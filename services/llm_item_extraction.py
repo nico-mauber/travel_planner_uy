@@ -17,6 +17,22 @@ from config.llm_config import DEFAULT_MODEL, EXTRACTION_TEMPERATURE
 
 logger = logging.getLogger(__name__)
 
+# Singleton para validacion de codigos IATA (carga una sola vez)
+_IATA_DB: Optional[dict] = None
+
+
+def _get_iata_db() -> dict:
+    """Retorna base de datos de codigos IATA (singleton, carga una sola vez)."""
+    global _IATA_DB
+    if _IATA_DB is None:
+        try:
+            import airportsdata
+            _IATA_DB = airportsdata.load("IATA")
+            logger.info("[iata_db] Cargado: %d aeropuertos", len(_IATA_DB))
+        except ImportError:
+            _IATA_DB = {}
+    return _IATA_DB
+
 
 # ─── Schema Pydantic para structured output ───
 
@@ -181,6 +197,28 @@ class ItemExtractionResult(BaseModel):
             "Si es una region/zona, inferir la ciudad con aeropuerto mas logica."
         ),
     )
+    flight_origin_iata: Optional[str] = Field(
+        default=None,
+        description=(
+            "Codigo IATA de 3 letras del aeropuerto de ORIGEN "
+            "(solo para intent 'flight_search'). "
+            "Usa tu conocimiento de aeropuertos mundiales. "
+            "Ej: 'Montevideo' -> 'MVD', 'Buenos Aires' -> 'EZE', "
+            "'Lima' -> 'LIM', 'Madrid' -> 'MAD'. "
+            "Si no conoces el codigo, dejar null."
+        ),
+    )
+    flight_destination_iata: Optional[str] = Field(
+        default=None,
+        description=(
+            "Codigo IATA de 3 letras del aeropuerto de DESTINO "
+            "(solo para intent 'flight_search'). "
+            "Usa tu conocimiento de aeropuertos mundiales. "
+            "Ej: 'Bali' -> 'DPS', 'Roma' -> 'FCO', 'Cusco' -> 'CUZ', "
+            "'Manaus' -> 'MAO', 'Brasilia' -> 'BSB', 'Tokio' -> 'NRT'. "
+            "Si no conoces el codigo, dejar null."
+        ),
+    )
     # ─── Campo compartido: cantidad de resultados ───
     result_count: Optional[int] = Field(
         default=None,
@@ -321,6 +359,9 @@ Si la intencion es "flight_search", EXTRAE tambien estos campos opcionales:
   * "flights from Santiago" → "Santiago"
   * CRITICO: "desde" seguido de FECHA no es origen: "vuelos desde el 15 de abril" → null, "vuelos desde el lunes" → null
   * Si el usuario NO menciona origen, dejar null (el sistema le pedira que lo indique)
+- flight_origin_iata: codigo IATA de 3 letras del aeropuerto de origen. Usa tu conocimiento de aeropuertos.
+  * "Montevideo" → "MVD", "Buenos Aires" → "EZE", "Lima" → "LIM", "Madrid" → "MAD"
+  * Si no conoces el codigo con certeza, dejar null
 - flight_destination: ciudad con aeropuerto mas cercana al DESTINO del viaje actual. Usa el contexto del viaje para inferir:
   * Destino "Amazonas, cerca de Manaos" → "Manaus" (ciudad con aeropuerto)
   * Destino "Machu Picchu" → "Cusco" (aeropuerto mas cercano)
@@ -328,6 +369,9 @@ Si la intencion es "flight_search", EXTRAE tambien estos campos opcionales:
   * Destino "Roma" → "Roma" (ya es ciudad con aeropuerto)
   * Destino "Punta del Este, Uruguay" → "Punta del Este" o "Montevideo"
   * Si el destino YA es una ciudad con aeropuerto, usarla directamente
+- flight_destination_iata: codigo IATA de 3 letras del aeropuerto de destino. Usa tu conocimiento de aeropuertos.
+  * "Bali" → "DPS", "Roma" → "FCO", "Cusco" → "CUZ", "Manaus" → "MAO", "Tokio" → "NRT"
+  * Si no conoces el codigo con certeza, dejar null
 - result_count: cantidad de resultados si la especifica (ver regla global mas abajo)
 
 CAMPO GLOBAL — result_count (aplica a hotel_search Y flight_search):
@@ -596,10 +640,12 @@ def _post_validate(
         if result.expense_id not in existing_expense_ids:
             result.expense_id = None
 
-    # ─── Validar flight_origin y flight_destination ───
+    # ─── Validar flight_origin, flight_destination y códigos IATA ───
     if result.intent != "flight_search":
         result.flight_origin = None
         result.flight_destination = None
+        result.flight_origin_iata = None
+        result.flight_destination_iata = None
     else:
         if result.flight_origin:
             origin = result.flight_origin.strip().rstrip(".,;:!?")
@@ -613,6 +659,18 @@ def _post_validate(
                 result.flight_destination = None
             else:
                 result.flight_destination = dest
+        # Validar códigos IATA contra base de datos real (singleton)
+        iata_db = _get_iata_db()
+        for attr in ("flight_origin_iata", "flight_destination_iata"):
+            val = getattr(result, attr)
+            if val:
+                val = val.strip().upper()
+                if len(val) != 3 or not val.isalpha():
+                    setattr(result, attr, None)
+                elif iata_db and val not in iata_db:
+                    setattr(result, attr, None)  # código no existe
+                else:
+                    setattr(result, attr, val)
 
     # ─── Validar result_count ───
     if result.result_count is not None:
@@ -758,7 +816,10 @@ def extract_item_with_llm(
         logger.info("━━━ LLM RAW RESULT (antes de _post_validate) ━━━")
         logger.info("  intent=%s", result.intent)
         logger.info("  name=%s, day=%s, item_type=%s", result.name, result.day, result.item_type)
-        logger.info("  flight_origin=%s, result_count=%s", result.flight_origin, result.result_count)
+        logger.info("  flight_origin=%s, flight_dest=%s, result_count=%s",
+                    result.flight_origin, result.flight_destination, result.result_count)
+        logger.info("  flight_origin_iata=%s, flight_dest_iata=%s",
+                    result.flight_origin_iata, result.flight_destination_iata)
         logger.info("  hotel_type=%s, hotel_location=%s, hotel_max_price=%s",
                     result.hotel_type, result.hotel_location, result.hotel_max_price)
         logger.info("  trip_destination=%s, trip_start=%s, trip_end=%s",

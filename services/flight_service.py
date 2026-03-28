@@ -46,184 +46,79 @@ _SEAT_MAP = {
     "first": "first",
 }
 
-# ─── Diccionario de aeropuertos comunes ───
+# ─── Helpers ───
 
-_AIRPORT_CODES: dict[str, str] = {
-    # Latinoamerica
-    "montevideo": "MVD",
-    "buenos aires": "EZE",
-    "aeroparque": "AEP",
-    "ezeiza": "EZE",
-    "santiago": "SCL",
-    "santiago de chile": "SCL",
-    "lima": "LIM",
-    "bogota": "BOG",
-    "ciudad de mexico": "MEX",
-    "mexico city": "MEX",
-    "cdmx": "MEX",
-    "sao paulo": "GRU",
-    "guarulhos": "GRU",
-    "rio de janeiro": "GIG",
-    "galeao": "GIG",
-    "brasilia": "BSB",
-    "medellin": "MDE",
-    "cartagena": "CTG",
-    "quito": "UIO",
-    "guayaquil": "GYE",
-    "caracas": "CCS",
-    "la paz": "LPB",
-    "santa cruz": "VVI",
-    "asuncion": "ASU",
-    "panama": "PTY",
-    "panama city": "PTY",
-    "san jose": "SJO",
-    "san jose costa rica": "SJO",
-    "san salvador": "SAL",
-    "tegucigalpa": "TGU",
-    "guatemala": "GUA",
-    "guatemala city": "GUA",
-    "managua": "MGA",
-    "santo domingo": "SDQ",
-    "punta cana": "PUJ",
-    "la habana": "HAV",
-    "havana": "HAV",
-    "cancun": "CUN",
-    "guadalajara": "GDL",
-    "monterrey": "MTY",
-    "cuzco": "CUZ",
-    "cusco": "CUZ",
-    "mendoza": "MDZ",
-    "cordoba argentina": "COR",
-    "bariloche": "BRC",
-    "punta del este": "PDP",
-    "valparaiso": "SCL",
-    "recife": "REC",
-    "salvador bahia": "SSA",
-    "florianopolis": "FLN",
-    "porto alegre": "POA",
-    "belo horizonte": "CNF",
-    "manaus": "MAO",
-    "manaos": "MAO",
-    "belem": "BEL",
-    "fortaleza": "FOR",
-    "curitiba": "CWB",
-    "natal": "NAT",
-    # Europa
-    "madrid": "MAD",
-    "barcelona": "BCN",
-    "paris": "CDG",
-    "charles de gaulle": "CDG",
-    "orly": "ORY",
-    "londres": "LHR",
-    "london": "LHR",
-    "heathrow": "LHR",
-    "gatwick": "LGW",
-    "roma": "FCO",
-    "rome": "FCO",
-    "fiumicino": "FCO",
-    "milan": "MXP",
-    "malpensa": "MXP",
-    "amsterdam": "AMS",
-    "berlin": "BER",
-    "frankfurt": "FRA",
-    "munich": "MUC",
-    "zurich": "ZRH",
-    "viena": "VIE",
-    "vienna": "VIE",
-    "lisboa": "LIS",
-    "lisbon": "LIS",
-    "dublin": "DUB",
-    "estambul": "IST",
-    "istanbul": "IST",
-    "atenas": "ATH",
-    "athens": "ATH",
-    "praga": "PRG",
-    "prague": "PRG",
-    "varsovia": "WAW",
-    "warsaw": "WAW",
-    "copenhague": "CPH",
-    "copenhagen": "CPH",
-    "estocolmo": "ARN",
-    "stockholm": "ARN",
-    "oslo": "OSL",
-    "helsinki": "HEL",
-    "bruselas": "BRU",
-    "brussels": "BRU",
-    "budapest": "BUD",
-    "bucarest": "OTP",
-    "bucharest": "OTP",
-    "edimburgo": "EDI",
-    "edinburgh": "EDI",
-    "manchester": "MAN",
-    "sevilla": "SVQ",
-    "malaga": "AGP",
-    "valencia": "VLC",
-    "bilbao": "BIO",
-    "niza": "NCE",
-    "nice": "NCE",
-    "lyon": "LYS",
-    "marsella": "MRS",
-    "marseille": "MRS",
-    "venecia": "VCE",
-    "venice": "VCE",
-    "napoles": "NAP",
-    "naples": "NAP",
-    # Norteamerica
-    "nueva york": "JFK",
-    "new york": "JFK",
-    "jfk": "JFK",
-    "newark": "EWR",
-    "miami": "MIA",
-    "los angeles": "LAX",
-    "chicago": "ORD",
-    "san francisco": "SFO",
-    "houston": "IAH",
-    "dallas": "DFW",
-    "atlanta": "ATL",
-    "washington": "IAD",
-    "washington dc": "IAD",
-    "boston": "BOS",
-    "seattle": "SEA",
-    "denver": "DEN",
-    "las vegas": "LAS",
-    "orlando": "MCO",
-    "toronto": "YYZ",
-    "montreal": "YUL",
-    "vancouver": "YVR",
-    # Asia y Oceania
-    "tokio": "NRT",
-    "tokyo": "NRT",
-    "narita": "NRT",
-    "haneda": "HND",
-    "pekin": "PEK",
-    "beijing": "PEK",
-    "shanghai": "PVG",
-    "hong kong": "HKG",
-    "singapur": "SIN",
-    "singapore": "SIN",
-    "bangkok": "BKK",
-    "seul": "ICN",
-    "seoul": "ICN",
-    "dubai": "DXB",
-    "abu dhabi": "AUH",
-    "doha": "DOH",
-    "mumbai": "BOM",
-    "nueva delhi": "DEL",
-    "new delhi": "DEL",
-    "sydney": "SYD",
-    "melbourne": "MEL",
-    "auckland": "AKL",
-    # Africa
-    "el cairo": "CAI",
-    "cairo": "CAI",
-    "johannesburgo": "JNB",
-    "johannesburg": "JNB",
-    "nairobi": "NBO",
-    "casablanca": "CMN",
-    "marrakech": "RAK",
-    "cape town": "CPT",
-    "ciudad del cabo": "CPT",
-}
+def _strip_accents(s: str) -> str:
+    """Elimina acentos/diacriticos de un string (ej: Brasília → Brasilia)."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s)
+        if unicodedata.category(c) != "Mn"
+    )
+
+
+# ─── Base de datos de aeropuertos (airportsdata: 7800+ aeropuertos) ───
+
+def _build_airport_index() -> dict[str, str]:
+    """Construye indice invertido city_normalized → IATA desde airportsdata.
+
+    Incluye aliases manuales para nombres en espanol y variantes comunes
+    que no estan en el dataset (ej: "manaos", "cdmx", "londres").
+    """
+    try:
+        import airportsdata
+        raw = airportsdata.load("IATA")
+    except ImportError:
+        logger.warning("airportsdata no instalado. Usando indice vacio.")
+        raw = {}
+
+    # Overrides curados: aeropuertos principales de ciudades ambiguas + nombres en espanol.
+    # Estos tienen PRIORIDAD sobre el dataset (que puede tener aeropuertos menores primero).
+    _OVERRIDES = {
+        # Ciudades con multiples aeropuertos — forzar el principal
+        "montevideo": "MVD", "buenos aires": "EZE", "roma": "FCO",
+        "rome": "FCO", "lima": "LIM", "manila": "MNL", "paris": "CDG",
+        "london": "LHR", "new york": "JFK", "moscow": "SVO",
+        "sao paulo": "GRU", "rio de janeiro": "GIG", "houston": "IAH",
+        "chicago": "ORD", "washington": "IAD", "san francisco": "SFO",
+        "tokyo": "NRT", "osaka": "KIX", "seoul": "ICN", "shanghai": "PVG",
+        "beijing": "PEK", "milan": "MXP", "stockholm": "ARN",
+        # Destinos turisticos con nombre diferente en el dataset
+        "bali": "DPS", "ushuaia": "USH", "machu picchu": "CUZ",
+        "punta cana": "PUJ", "playa del carmen": "CUN",
+        "riviera maya": "CUN", "costa amalfitana": "NAP",
+        # Espanol y variantes no presentes en el dataset
+        "manaos": "MAO", "cdmx": "MEX", "ciudad de mexico": "MEX",
+        "londres": "LHR", "viena": "VIE", "atenas": "ATH", "praga": "PRG",
+        "varsovia": "WAW", "copenhague": "CPH", "estocolmo": "ARN",
+        "bruselas": "BRU", "bucarest": "OTP", "edimburgo": "EDI",
+        "niza": "NCE", "marsella": "MRS", "venecia": "VCE", "napoles": "NAP",
+        "estambul": "IST", "nueva york": "JFK", "nueva delhi": "DEL",
+        "pekin": "PEK", "tokio": "NRT", "singapur": "SIN", "seul": "ICN",
+        "el cairo": "CAI", "johannesburgo": "JNB", "ciudad del cabo": "CPT",
+        "la habana": "HAV", "punta del este": "PDP", "santiago de chile": "SCL",
+        "san jose costa rica": "SJO", "cordoba argentina": "COR",
+        "salvador bahia": "SSA", "lisboa": "LIS", "sevilla": "SVQ",
+        "malaga": "AGP", "bilbao": "BIO",
+    }
+
+    # 1. Empezar con overrides curados (prioridad maxima)
+    index: dict[str, str] = dict(_OVERRIDES)
+
+    # 2. Rellenar desde dataset (solo ciudades que NO estan en overrides)
+    for iata, info in raw.items():
+        city = info.get("city", "")
+        if not city:
+            continue
+        normalized = _strip_accents(city.strip().lower())
+        if normalized not in index:
+            index[normalized] = iata
+
+    logger.info("[flights] Indice de aeropuertos construido: %d entradas", len(index))
+    return index
+
+
+# Inicializar indice al importar el modulo (una sola vez)
+_AIRPORT_INDEX = _build_airport_index()
 
 
 def _sanitize_query_param(value: str) -> str:
@@ -260,36 +155,25 @@ def _make_cache_key(prefix: str, **kwargs) -> str:
     return f"{prefix}:{'|'.join(parts)}"
 
 
-# ─── Funciones auxiliares ───
-
-def _strip_accents(s: str) -> str:
-    """Elimina acentos/diacriticos de un string (ej: Brasília → Brasilia)."""
-    return "".join(
-        c for c in unicodedata.normalize("NFD", s)
-        if unicodedata.category(c) != "Mn"
-    )
-
-
 def get_airport_code(city_name: str) -> str:
-    """Intenta mapear un nombre de ciudad a codigo IATA.
+    """Mapea nombre de ciudad a codigo IATA usando base de datos de 7800+ aeropuertos.
 
-    Incluye un diccionario de aeropuertos comunes de Latinoamerica, Europa,
-    Norteamerica, Asia, Oceania y Africa.
-    Normaliza acentos para matchear (ej: Brasília → brasilia → BSB).
-    Si no encuentra, retorna el string original en mayusculas.
+    Normaliza acentos (Brasília → brasilia → BSB).
+    Busca exacto, luego parcial (substring).
+    Si no encuentra, retorna el string en mayusculas como fallback.
     """
     if not city_name:
         return ""
     normalized = _strip_accents(city_name.strip().lower())
     # Busqueda exacta
-    if normalized in _AIRPORT_CODES:
-        return _AIRPORT_CODES[normalized]
+    if normalized in _AIRPORT_INDEX:
+        return _AIRPORT_INDEX[normalized]
     # Si ya parece un codigo IATA, retornarlo en mayusculas
-    upper = city_name.strip().upper()
+    upper = _strip_accents(city_name.strip().upper())
     if _validate_iata(upper):
         return upper
     # Busqueda parcial (primera coincidencia)
-    for key, code in _AIRPORT_CODES.items():
+    for key, code in _AIRPORT_INDEX.items():
         if normalized in key or key in normalized:
             return code
     return upper
@@ -472,21 +356,14 @@ def _search_serpapi(
         "currency": "USD",
         "hl": "es",
         "api_key": api_key,
+        "stops": "0",            # cualquier cantidad de escalas
+        "deep_search": "true",   # carga completa (rutas con conexiones)
     }
     if return_date:
         params["return_date"] = return_date
         params["type"] = "1"  # round trip
     else:
         params["type"] = "2"  # one way
-
-    ck = _make_cache_key(
-        "serpapi_flights", origin=origin, destination=destination,
-        departure_date=departure_date, return_date=return_date,
-        adults=str(adults), cabin_class=cabin_class,
-    )
-    cached = _cache_get(ck)
-    if cached is not None:
-        return cached[:max_results]
 
     try:
         with httpx.Client(timeout=35) as client:
@@ -504,6 +381,14 @@ def _search_serpapi(
     best_flights = raw.get("best_flights", [])
     other_flights = raw.get("other_flights", [])
     all_results = best_flights + other_flights
+    logger.info("[serpapi] Response keys: %s", list(raw.keys()))
+    logger.info("[serpapi] best_flights=%d, other_flights=%d, total=%d",
+                len(best_flights), len(other_flights), len(all_results))
+    if not all_results:
+        # Loguear mensaje de error de SerpAPI si existe
+        error_msg = raw.get("error") or raw.get("search_information", {}).get("flight_results_state", "")
+        logger.warning("[serpapi] Sin resultados. error=%s, raw_preview=%s",
+                      error_msg, str(raw)[:500])
 
     flights = []
     for group in all_results[:max_results]:
@@ -575,7 +460,6 @@ def _search_serpapi(
             "_source": "serpapi",
         })
 
-    _cache_set(ck, flights)
     return flights[:max_results]
 
 
@@ -669,6 +553,8 @@ def search_flights_for_trip(
     trip: dict,
     origin: str = "",
     destination_city: str = "",
+    origin_iata: str = "",
+    dest_iata: str = "",
     max_results: int = 5,
 ) -> list[dict]:
     """Busca vuelos usando el contexto del viaje activo.
@@ -676,22 +562,24 @@ def search_flights_for_trip(
     Args:
         trip: dict del viaje con destination, start_date, end_date
         origin: ciudad de origen (extraida por el LLM)
-        destination_city: ciudad con aeropuerto mas cercana al destino (extraida por el LLM).
-            Si vacio, usa trip["destination"] como fallback.
+        destination_city: ciudad con aeropuerto mas cercana al destino (extraida por el LLM)
+        origin_iata: codigo IATA de origen extraido por el LLM (prioridad sobre lookup)
+        dest_iata: codigo IATA de destino extraido por el LLM (prioridad sobre lookup)
         max_results: cantidad maxima de vuelos a retornar
     """
-    if not origin:
+    if not origin and not origin_iata:
         return []
 
-    # Destino: preferir destination_city del LLM (ya es ciudad con aeropuerto)
-    dest_search = destination_city or trip.get("destination", "")
-    if not dest_search:
-        return []
+    # Prioridad: IATA del LLM > lookup por ciudad > fallback trip destination
+    origin_code = origin_iata if origin_iata and _validate_iata(origin_iata) else get_airport_code(origin) if origin else ""
+    dest_code = dest_iata if dest_iata and _validate_iata(dest_iata) else ""
+    if not dest_code:
+        dest_search = destination_city or trip.get("destination", "")
+        dest_code = get_airport_code(dest_search) if dest_search else ""
 
-    origin_code = get_airport_code(origin)
-    dest_code = get_airport_code(dest_search)
-    logger.info("[flights] origin='%s' -> %s, destination_city='%s' -> %s (trip.destination='%s')",
-                origin, origin_code, dest_search, dest_code, trip.get("destination", ""))
+    logger.info("[flights] origin='%s' iata_llm='%s' -> %s | dest_city='%s' iata_llm='%s' -> %s (trip='%s')",
+                origin, origin_iata, origin_code, destination_city, dest_iata, dest_code,
+                trip.get("destination", ""))
 
     departure_date = trip.get("start_date", "")
     return_date = trip.get("end_date", "")

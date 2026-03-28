@@ -193,38 +193,44 @@ def add_message(chat: dict, message: dict) -> None:
     sb.table("chats").update({"last_activity_at": now}).eq("chat_id", chat["chat_id"]).execute()
 
 
-def persist_chat(chat: dict) -> None:
+def persist_chat(chat: dict, full_sync: bool = False) -> None:
     """Persiste el estado actual de un chat en Supabase.
 
-    Sincroniza mensajes: borra todos los existentes y re-inserta.
-    Esto maneja correctamente cambios en mensajes (ej: processed=True).
+    Args:
+        chat: dict del chat con mensajes
+        full_sync: si True, borra y reinserta todos los mensajes.
+            Necesario cuando mensajes existentes cambian (ej: processed=True).
+            Si False (default), solo actualiza metadatos del chat.
     """
     from services.supabase_client import get_supabase_client
 
     sb = get_supabase_client()
     chat_id = chat["chat_id"]
 
-    # Actualizar metadatos del chat
-    sb.table("chats").update({
+    # Actualizar metadatos del chat (incluye trip_id para cuando se asocia a un viaje recien creado)
+    update_data = {
         "title": chat.get("title", "Nueva conversacion"),
         "last_activity_at": chat.get("last_activity_at", datetime.now().isoformat()),
-    }).eq("chat_id", chat_id).execute()
+    }
+    if chat.get("trip_id"):
+        update_data["trip_id"] = chat["trip_id"]
+    sb.table("chats").update(update_data).eq("chat_id", chat_id).execute()
 
-    # Re-sincronizar mensajes: borrar y reinsertar
-    sb.table("chat_messages").delete().eq("chat_id", chat_id).execute()
-
-    for idx, msg in enumerate(chat.get("messages", [])):
-        content = msg.get("content", "")
-        msg_row = {
-            "chat_id": chat_id,
-            "role": msg.get("role", "assistant"),
-            "msg_type": msg.get("type", "text"),
-            "content": content,
-            "processed": msg.get("processed", False),
-            "result": msg.get("result"),
-            "sort_order": idx,
-        }
-        sb.table("chat_messages").insert(msg_row).execute()
+    # Full sync: borrar y reinsertar todos los mensajes (solo cuando cambian mensajes existentes)
+    if full_sync:
+        sb.table("chat_messages").delete().eq("chat_id", chat_id).execute()
+        for idx, msg in enumerate(chat.get("messages", [])):
+            content = msg.get("content", "")
+            msg_row = {
+                "chat_id": chat_id,
+                "role": msg.get("role", "assistant"),
+                "msg_type": msg.get("type", "text"),
+                "content": content,
+                "processed": msg.get("processed", False),
+                "result": msg.get("result"),
+                "sort_order": idx,
+            }
+            sb.table("chat_messages").insert(msg_row).execute()
 
 
 def auto_generate_title(first_message: str) -> str:
