@@ -1,10 +1,13 @@
 """Servicio de gestión de viajes — CRUD, sincronización — Supabase backend."""
 
 import uuid
+import logging
 from datetime import date
 from typing import Optional
 
 from config.settings import TripStatus, ItemStatus, DEMO_USER_ID
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Helpers de conversión DB → dict ───
@@ -182,19 +185,45 @@ def create_trip(trips: list, name: str, destination: str,
 
 
 def delete_trip(trips: list, trip_id: str, user_id: Optional[str] = None) -> bool:
-    """Elimina un viaje (solo si está en planificación y pertenece al usuario). CASCADE elimina items."""
+    """Elimina un viaje (solo si está en planificación y pertenece al usuario).
+
+    CASCADE elimina items (FK en itinerary_items).
+    Elimina explícitamente los chats asociados (y sus mensajes por CASCADE).
+    """
     from services.supabase_client import get_supabase_client
+
+    logger.info("━━━ DELETE_TRIP ━━━")
+    logger.info("  trip_id=%s, user_id=%s", trip_id, user_id)
 
     for i, trip in enumerate(trips):
         if trip["id"] == trip_id:
-            # Verificar ownership si se proporcionó user_id
+            logger.info("  Trip encontrado: name='%s', status='%s', user_id='%s'",
+                        trip.get("name"), trip.get("status"), trip.get("user_id"))
+
             if user_id and trip.get("user_id") and trip["user_id"] != user_id:
+                logger.warning("  RECHAZADO: ownership mismatch (trip.user_id=%s != %s)",
+                              trip.get("user_id"), user_id)
                 return False
+
             if trip["status"] == TripStatus.PLANNING.value:
+                # Eliminar chats asociados ANTES de eliminar el viaje
+                if user_id:
+                    from services.chat_service import delete_chats_for_trip
+                    logger.info("  Eliminando chats asociados...")
+                    deleted_count = delete_chats_for_trip(trip_id, user_id)
+                    logger.info("  Chats eliminados: %d", deleted_count)
+
                 trips.pop(i)
                 sb = get_supabase_client()
+                logger.info("  Eliminando viaje de Supabase...")
                 sb.table("trips").delete().eq("id", trip_id).execute()
+                logger.info("  Viaje eliminado OK")
                 return True
+            else:
+                logger.warning("  RECHAZADO: status='%s' (solo se permite 'en_planificacion')",
+                              trip.get("status"))
+
+    logger.warning("  Trip ID '%s' no encontrado en la lista (%d viajes)", trip_id, len(trips))
     return False
 
 

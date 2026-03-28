@@ -228,6 +228,13 @@ try:
                     st.session_state.trips = trips
                     if st.session_state.active_trip_id == trip_id:
                         st.session_state.active_trip_id = None
+                    # Limpiar estado de chat si apuntaba al viaje eliminado
+                    if st.session_state.get("chat_selected_trip_id") == trip_id:
+                        st.session_state.pop("chat_selected_trip_id", None)
+                    if st.session_state.get("_chat_prev_trip_id") == trip_id:
+                        st.session_state.pop("_chat_prev_trip_id", None)
+                    st.session_state.pop("active_chat_id", None)
+                    st.session_state.pop("user_chats", None)
                     st.session_state._confirm_delete = None
                     st.rerun()
             with c2:

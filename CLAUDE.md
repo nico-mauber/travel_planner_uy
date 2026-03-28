@@ -75,10 +75,10 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 |---|---|
 | `supabase_client.py` | Cliente Supabase singleton. Lee `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` de `.env` |
 | `trip_service.py` | CRUD de viajes, agrupacion de items por dia, aceptar/descartar sugerencias, recalculo de presupuesto, sincronizacion con Supabase. Servicio central |
-| `agent_service.py` | Dispatcher principal del chat. 2 paths: CON LLM (el LLM detecta ALL intents semanticamente, sin keywords) y SIN LLM (keywords centralizadas en item_extraction). Deteccion lazy (`_check_llm()`). Sanitizacion de input. Funciones extraidas: `_hotel_search_response()`, `_llm_chat_response()` |
-| `item_extraction.py` | Utilidades de validacion, confirmacion y fallback basico. ALL keywords de fallback centralizadas aqui (`_CALENDAR_KEYWORDS`, `_HOTEL_KEYWORDS`, `_REMOVE_KEYWORDS`, `_ADD_KEYWORDS`). Funciones `detect_*_intent()` solo para path sin LLM |
-| `llm_item_extraction.py` | Extraccion inteligente de items via LLM structured output (`ChatOpenAI.with_structured_output` + schema Pydantic `ItemExtractionResult`). Detecta intent + extrae datos en una sola llamada. Post-validacion defensiva |
-| `trip_creation_flow.py` | Flujo multi-turn de creacion de viajes desde el chat. Deteccion de intencion (strong/weak keywords), extraccion de destino y fechas con regex, validacion. Logica pura sin Streamlit |
+| `agent_service.py` | Dispatcher principal del chat. LLM-only: una sola llamada al LLM detecta ALL intents y extrae datos (sin keywords/regex). Deteccion lazy (`_check_llm()`). Sanitizacion de input. `_dispatch_llm_intent()` rutea por intent. Sin LLM → "IA no disponible" |
+| `item_utils.py` | Utilidades puras de validacion y construccion de items: `calculate_end_time()`, `validate_item_day_range()`, `detect_time_conflict()`, `build_item_confirmation_data()`, `new_item_draft()` |
+| `llm_item_extraction.py` | Extraccion inteligente via LLM structured output (`ChatOpenAI.with_structured_output` + schema Pydantic `ItemExtractionResult`). Detecta intent + extrae TODOS los datos en una sola llamada: items, vuelos (flight_origin), hoteles (hotel_type/location/price), viajes (trip_start_date/end_date), cantidad de resultados (result_count). Post-validacion defensiva |
+| `trip_creation_flow.py` | Flujo multi-turn de creacion de viajes desde el chat. Extraccion de destino y fechas con regex (robusto para espanol), validacion de fechas. `detect_cancel_intent()` para cancelar flujos. Logica pura sin Streamlit |
 | `auth_service.py` | OAuth condicional (Authlib + secrets.toml). Guard `require_auth()`. CRUD de usuarios en Supabase |
 | `chat_service.py` | Multi-conversacion por usuario. CRUD de chats, auto-titulo, persistencia en Supabase |
 | `llm_agent_service.py` | Wrapper delgado sobre `TripChatbot`. Importa condicionalmente |
@@ -149,51 +149,43 @@ Tablas en Supabase (PostgreSQL):
 
 **Multi-usuario:** Todos los servicios aceptan `user_id`. Supabase aisla datos por `user_id` (FK en todas las tablas). RLS habilitado para seguridad adicional.
 
-## Chat — Dual mode (LLM / Fallback)
+## Chat — LLM-Only
 
-- `agent_service.py` detecta `OPENAI_API_KEY` de forma **lazy** (`_check_llm()`). La deteccion se ejecuta la primera vez que se procesa un mensaje, no al importar el modulo. Esto evita problemas con el hot-reload de Streamlit que puede re-importar modulos antes de que `load_dotenv()` haya corrido. Carga tanto el chatbot LLM (`_llm_process_fn`) como el extractor de items (`_llm_extract_fn` desde `llm_item_extraction.py`).
-- Las **acciones que modifican datos** (crear viaje, agregar/eliminar items, eventos de cronograma) **siempre** pasan por pattern matching para generar confirmaciones con botones UI, nunca por el LLM.
-- Los mensajes son dicts con `{role, type, content}`. `type` puede ser `"text"`, `"card"`, `"confirmation"` o `"hotel_results"`. Las confirmaciones procesadas se marcan con `msg["processed"] = True`.
+- `agent_service.py` detecta `OPENAI_API_KEY` de forma **lazy** (`_check_llm()`). La deteccion se ejecuta la primera vez que se procesa un mensaje, no al importar el modulo. Carga el chatbot LLM (`_llm_process_fn`) y el extractor de items (`_llm_extract_fn` desde `llm_item_extraction.py`).
+- Las **acciones que modifican datos** (crear viaje, agregar/eliminar items, eventos de cronograma) generan confirmaciones con botones UI.
+- Los mensajes son dicts con `{role, type, content}`. `type` puede ser `"text"`, `"card"`, `"confirmation"`, `"hotel_results"` o `"flight_results"`. Las confirmaciones procesadas se marcan con `msg["processed"] = True`.
+- **Sin LLM** (`OPENAI_API_KEY` ausente): el chat muestra "IA no disponible" y redirige al usuario a la UI.
 
-**Prioridad de ruteo en `agent_service.py`** — 2 paths mutuamente excluyentes:
+**Flujo de ruteo en `agent_service.py`** (secuencial):
+1. **Sanitizar input** (`_sanitize_user_input`) — regex de seguridad contra prompt injection
+2. **LLM extraction UNICA** — si hay LLM + viaje activo, UNA sola llamada a `_llm_extract_fn()` que retorna `ItemExtractionResult` con intent + todos los datos extraidos
+3. **Flujo multi-turn de creacion de viaje** — si hay draft activo. `detect_cancel_intent()` para cancelar
+4. **Escape de draft de item** — si el LLM clasifico como intent distinto de `add_item`, cancela el draft automaticamente
+5. **Flujo multi-turn de creacion de item** — si hay draft activo. Usa `llm_result` directamente (sin 2da llamada LLM)
+6. **Sin viaje activo** → LLM chat
+7. **`_dispatch_llm_intent(llm_result)`** — rutea por intent:
+   - `add_item`, `create_trip`, `calendar_event`, `remove_item` → confirmaciones
+   - `hotel_search` → `_hotel_search_response(llm_result=result)` con filtros del LLM
+   - `flight_search` → `_flight_search_response(llm_result=result)` con `flight_origin` del LLM
+   - `add_expense`, `modify_expense`, `remove_expense` → confirmaciones de gastos
+   - `informative`/`unknown` → fall-through al LLM chat
 
-*CON LLM* (orden estricto):
-1. **Flujo multi-turn de creacion de viaje** (`trip_creation_flow.py`) — si hay draft activo
-2. **Flujo multi-turn de creacion de item** (`item_extraction.py`) — si hay draft activo. Preguntas informativas escapan al LLM sin consumir turno
-3. **Deteccion unificada via LLM** (`_handle_llm_extraction`) — UNA sola llamada detecta intent (`add_item`, `calendar_event`, `remove_item`, `hotel_search`, `informative`, `unknown`) y extrae datos. **Sin keywords, sin guards previos** — el LLM entiende la intencion semanticamente sin importar idioma o palabras exactas
-4. **LLM chat** (`_llm_chat_response`) — fall-through para informative/unknown
-
-*SIN LLM* (fallback por keywords):
-1. **Flujo multi-turn de creacion de viaje** — si hay draft activo
-2. **Flujo multi-turn de creacion de item** — si hay draft activo
-3. **Keywords**: calendario → agregar item → eliminar → hotel (funciones `detect_*_intent()` centralizadas en `item_extraction.py`)
-4. **"IA no disponible"** — mensaje de fallback final
-
-**Extraccion inteligente de items — Dual mode (LLM / Fallback):**
-
-*Con LLM* (`llm_item_extraction.py`):
-- `ChatOpenAI.with_structured_output(ItemExtractionResult)` — una sola llamada detecta intent y extrae datos estructurados
-- Schema Pydantic `ItemExtractionResult`: intent (incluye `hotel_search`), name, day, start_time, end_time, item_type, location, cost, is_complete, missing_fields, follow_up_question
+**Extraccion inteligente via LLM** (`llm_item_extraction.py`):
+- `ChatOpenAI.with_structured_output(ItemExtractionResult)` — una sola llamada detecta intent y extrae TODOS los datos
+- Schema Pydantic `ItemExtractionResult` (27 campos): intent, name, day, start_time, end_time, item_type, location, cost, is_complete, missing_fields, follow_up_question, remove_item_ids, remove_all, remove_summary, trip_destination, trip_start_date, trip_end_date, trip_name, expense_category, expense_id, expense_amount, remove_all_expenses, hotel_type, hotel_location, hotel_max_price, flight_origin, result_count
 - System prompt semantico: describe intenciones por significado, NO por keywords. El LLM entiende cualquier idioma/fraseo
-- Post-validacion defensiva (`_post_validate`): valida intent, item_type, rango de dias, formato de horas, merge con draft existente
+- Post-validacion defensiva (`_post_validate`): valida intent, item_type, rango de dias, formato de horas, flight_origin (sin digitos), result_count (1-10), fechas ISO para create_trip, merge con draft existente
 - Singleton `_extraction_llm` (ChatOpenAI con `EXTRACTION_TEMPERATURE=0` para determinismo)
-- Interpreta ordinales ("tercer dia" -> 3), referencias relativas ("ultimo dia", "manana"), y periodos ("por la tarde" -> 15:00)
 
-*Sin LLM — fallback* (`item_extraction.py`):
-- Extraccion basica por regex y keywords: dia (`dia N`), hora (`HH:MM`), tipo por keywords
-- **ALL keywords de fallback centralizadas** en este modulo: `_ADD_KEYWORDS`, `_CALENDAR_KEYWORDS`, `_HOTEL_KEYWORDS`, `_REMOVE_KEYWORDS`, `_ITEM_TYPE_KEYWORDS`
-- Funciones de deteccion de intent: `detect_add_item_intent()`, `detect_calendar_intent()`, `detect_hotel_intent()`, `detect_remove_item_intent()`
+**Utilidades de items** (`item_utils.py`):
+- Funciones puras de negocio: `calculate_end_time()`, `validate_item_day_range()`, `detect_time_conflict()`, `build_item_confirmation_data()`, `new_item_draft()`
+- Constantes: `_DEFAULT_DURATIONS` (horas por tipo), `_DEFAULT_TIMES` (horario default por tipo)
 
-*Comun a ambos modos:*
-- Flujo multi-turn (max 3 turnos) si faltan datos minimos (nombre + dia)
-- Calcula `end_time` por duraciones default segun tipo (`_DEFAULT_DURATIONS`)
-- Detecta conflictos horarios con items existentes (`detect_time_conflict`)
-- Genera confirmacion con tarjeta rica (`build_item_confirmation_data`)
-
-**Deteccion de intencion de creacion de viaje** (`trip_creation_flow.py`):
-- Keywords **fuertes** ("quiero ir", "crear viaje", "me gustaria ir") -> siempre disparan creacion
-- Keywords **debiles** ("viaje", "vacaciones", "visitar") -> NO disparan si el mensaje es una pregunta o refiere a un viaje existente
+**Creacion de viajes** (`trip_creation_flow.py`):
+- Flujo multi-turn con draft. `detect_cancel_intent()` para cancelar
+- `extract_trip_data()` con regex robusto de fechas en espanol (6 formatos: rango cruzado, mismo mes, solo mes, ISO, numerico, individual)
 - Proteccion anti-duplicado: si hay viaje activo al mismo destino, no inicia creacion
+- El LLM detecta intent `create_trip` y extrae `trip_destination`, `trip_start_date`, `trip_end_date` — regex como fallback
 
 **Multi-conversacion:** `chat_service.py` gestiona multiples chats por usuario. Cada chat tiene `{chat_id, user_id, trip_id, title, messages}`. Auto-genera titulo desde el primer mensaje. Persistido en Supabase (tablas `chats` + `chat_messages`).
 
@@ -210,7 +202,7 @@ Tablas en Supabase (PostgreSQL):
 - Flujo: `search_flights(origin, destination, date)` -> `format_flights_as_cards()`.
 - `search_flights_for_trip(trip)` usa destino y fechas del viaje activo. Necesita ciudad de origen del usuario.
 - `get_airport_code(city_name)` mapea ciudades a codigos IATA (169 ciudades de Latam, Europa, NA, Asia, Africa).
-- Intent `flight_search` en el dispatcher: detectado por LLM semanticamente o por keywords (`_FLIGHT_KEYWORDS`).
+- Intent `flight_search` en el dispatcher: detectado por LLM semanticamente. El LLM extrae `flight_origin` (ciudad de origen) y `result_count` (cantidad de resultados).
 - Renderizado: `render_flight_results()` en chat_widget.py como tabla compacta HTML.
 - Cache en memoria con TTL de 1 hora. Si `RAPIDAPI_KEY` no esta configurada, retorna listas vacias.
 

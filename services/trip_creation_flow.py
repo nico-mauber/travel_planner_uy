@@ -15,30 +15,6 @@ _MESES = {
 
 _MESES_PATTERN = "|".join(_MESES.keys())
 
-# ─── Keywords de intención ───
-# Keywords fuertes: siempre disparan creación, incluso en preguntas
-_STRONG_CREATION_KEYWORDS = [
-    "quiero ir", "vamos a", "me gustaria ir", "me gustaría ir",
-    "quisiera ir", "quisiera viajar", "quisiera conocer",
-    "quisiera visitar", "quiero conocer", "quiero visitar",
-    "crear viaje", "crea viaje", "crear un viaje", "crea un viaje",
-    "armar viaje", "armar un viaje", "hazme un viaje",
-    "quiero viajar", "planificar un viaje", "planear un viaje",
-    "organizar un viaje",
-]
-
-# Keywords débiles: solo disparan si NO es una pregunta sobre un viaje existente
-_WEAK_CREATION_KEYWORDS = [
-    "viajar", "viaje", "ir a", "escapada", "vacaciones",
-    "planear", "planificar", "organizar", "conocer", "visitar",
-]
-
-# Patrones que indican referencia a un viaje existente
-_EXISTING_TRIP_PATTERNS = [
-    "mi viaje", "el viaje", "nuestro viaje", "del viaje", "este viaje",
-    "mis vacaciones", "las vacaciones", "nuestras vacaciones",
-]
-
 _CANCEL_KEYWORDS = [
     "cancelar", "cancelo", "no quiero", "olvidalo", "olvídalo",
     "dejalo", "déjalo", "mejor no", "no importa", "nada",
@@ -136,29 +112,6 @@ def _parse_date(day: int, month_name: str, year_str: str = None) -> str:
         return date(year, month, day).isoformat()
     except ValueError:
         return None
-
-
-def detect_trip_creation_intent(msg: str) -> bool:
-    """Detecta si el mensaje tiene intención de crear un viaje.
-
-    Keywords fuertes (ej: "quiero ir", "crear viaje") siempre disparan.
-    Keywords débiles (ej: "viaje", "vacaciones") NO disparan si el mensaje
-    es una pregunta sobre un viaje existente.
-    """
-    lower = msg.lower().strip()
-
-    # Keywords fuertes siempre disparan
-    if any(kw in lower for kw in _STRONG_CREATION_KEYWORDS):
-        return True
-
-    # Si refiere a un viaje existente o es una pregunta, keywords débiles no disparan
-    refers_to_existing = any(p in lower for p in _EXISTING_TRIP_PATTERNS)
-    is_question = "?" in lower or "¿" in lower
-
-    if refers_to_existing or is_question:
-        return False
-
-    return any(kw in lower for kw in _WEAK_CREATION_KEYWORDS)
 
 
 def detect_cancel_intent(msg: str) -> bool:

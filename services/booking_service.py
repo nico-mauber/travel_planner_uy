@@ -104,6 +104,16 @@ def search_destinations(query: str) -> list[dict]:
                 headers=_headers(),
                 params={"query": query},
             )
+            # Retry con backoff si rate limited
+            if resp.status_code == 429:
+                import time
+                logger.info("[booking] Rate limit (429) en search_destinations, retry en 2s...")
+                time.sleep(2)
+                resp = client.get(
+                    f"https://{RAPIDAPI_HOST}/api/v1/hotels/searchDestination",
+                    headers=_headers(),
+                    params={"query": query},
+                )
             resp.raise_for_status()
             raw = resp.json()
 
@@ -133,9 +143,17 @@ def search_destinations(query: str) -> list[dict]:
                 "longitude": item.get("longitude"),
             })
 
-        _cache_set(ck, results[:5])
+        # Solo cachear si hay resultados (evitar cache poisoning por 429)
+        if results:
+            _cache_set(ck, results[:5])
         return results[:5]
 
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429:
+            logger.warning("[booking] Rate limit (429) en search_destinations para '%s'", query)
+        else:
+            logger.warning("Error buscando destinos en Booking.com: %s", e)
+        return []
     except Exception as e:
         logger.warning("Error buscando destinos en Booking.com: %s", e)
         return []
@@ -176,6 +194,7 @@ def search_hotels(
     )
     cached = _cache_get(ck)
     if cached is not None:
+        logger.info("[booking] Cache hit para hotels (%d resultados)", len(cached))
         return cached[:limit]
 
     try:
@@ -196,6 +215,27 @@ def search_hotels(
                     "units": "metric",
                 },
             )
+            # Retry con backoff si rate limited
+            if resp.status_code == 429:
+                import time
+                logger.info("[booking] Rate limit (429) en search_hotels, retry en 2s...")
+                time.sleep(2)
+                resp = client.get(
+                    f"https://{RAPIDAPI_HOST}/api/v1/hotels/searchHotels",
+                    headers=_headers(),
+                    params={
+                        "dest_id": dest_id,
+                        "search_type": search_type,
+                        "arrival_date": checkin,
+                        "departure_date": checkout,
+                        "adults": str(adults),
+                        "room_qty": str(rooms),
+                        "page_number": "1",
+                        "currency_code": currency,
+                        "languagecode": "es",
+                        "units": "metric",
+                    },
+                )
             resp.raise_for_status()
             raw = resp.json()
 
@@ -204,8 +244,14 @@ def search_hotels(
         hotel_list = []
         if isinstance(data, dict):
             hotel_list = data.get("hotels", [])
+            logger.info("[booking] API response: data es dict, hotels=%d, keys=%s",
+                        len(hotel_list), list(data.keys())[:5])
         elif isinstance(data, list):
             hotel_list = data
+            logger.info("[booking] API response: data es list, len=%d", len(hotel_list))
+        else:
+            logger.warning("[booking] API response inesperada: raw_type=%s, data_type=%s",
+                          type(raw).__name__, type(data).__name__)
 
         results = []
         for entry in hotel_list:
@@ -261,7 +307,11 @@ def search_hotels(
                 "accessibility_label": entry.get("accessibilityLabel", ""),
             })
 
-        _cache_set(ck, results)
+        # Solo cachear si hay resultados (evitar cache poisoning por error temporal)
+        if results:
+            _cache_set(ck, results)
+        else:
+            logger.info("[booking] No se cachean 0 resultados (posible error temporal)")
         return results[:limit]
 
     except Exception as e:
@@ -285,43 +335,87 @@ def search_hotels_for_trip(
     trip: dict,
     query: str = "",
     limit: int = 5,
+    location_hint: str = "",
 ) -> list[dict]:
     """Busca hoteles usando el contexto del viaje activo."""
     destination = trip.get("destination", "")
     if not destination:
+        logger.info("[booking] Sin destino en trip")
         return []
 
     # Limpiar destino (quitar años, numeros) y tomar parte antes de la coma
     clean_dest = _clean_destination(destination)
     search_term = clean_dest.split(",")[0].strip()
+    # Si hay ubicación específica (barrio/zona), prepend al search term
+    if location_hint:
+        search_term = f"{location_hint} {search_term}"
+
+    logger.info("[booking] search_term='%s' (destination='%s', location_hint='%s')",
+                search_term, destination, location_hint)
 
     if not search_term:
         return []
 
     # Obtener dest_id
     destinations = search_destinations(search_term)
+    logger.info("[booking] search_destinations('%s') → %d resultados", search_term, len(destinations))
+    if destinations:
+        logger.info("[booking]   primer destino: dest_id=%s, name=%s, type=%s",
+                    destinations[0].get("dest_id"), destinations[0].get("name"), destinations[0].get("dest_type"))
+
     if not destinations and "," in clean_dest:
-        # Reintentar con nombre completo limpio
+        logger.info("[booking] Retry con clean_dest='%s'", clean_dest)
         destinations = search_destinations(clean_dest)
+        logger.info("[booking]   retry → %d resultados", len(destinations))
+
     if not destinations:
+        logger.warning("[booking] Sin destinos encontrados para '%s'", search_term)
         return []
 
     dest = destinations[0]
     checkin = trip.get("start_date", "")
     checkout = trip.get("end_date", "")
     if not checkin or not checkout:
+        logger.warning("[booking] Sin fechas: checkin=%s, checkout=%s", checkin, checkout)
         return []
 
-    return search_hotels(
+    logger.info("[booking] Buscando hoteles: dest_id=%s, type=%s, %s → %s",
+                dest["dest_id"], dest.get("dest_type", "CITY"), checkin, checkout)
+    results = search_hotels(
         dest_id=dest["dest_id"],
         checkin=checkin,
         checkout=checkout,
         search_type=dest.get("dest_type", "CITY").upper(),
         limit=limit,
     )
+    logger.info("[booking] search_hotels → %d hoteles", len(results))
+    return results
 
 
-def format_hotels_as_cards(hotels: list[dict]) -> list[dict]:
+def _filter_hotels(
+    hotels: list[dict],
+    hotel_type: str = "",
+    max_price: float = 0,
+) -> list[dict]:
+    """Filtra hoteles por tipo y precio (post-respuesta de API).
+
+    La API DataCrawler no soporta estos filtros, así que se aplican en Python.
+    Si el filtro vacía todo, retorna la lista original.
+    """
+    filtered = list(hotels)
+    if max_price and max_price > 0:
+        price_filtered = [h for h in filtered if h.get("price", 0) <= max_price]
+        if price_filtered:
+            filtered = price_filtered
+    if hotel_type:
+        ht = hotel_type.lower()
+        type_filtered = [h for h in filtered if ht in h.get("name", "").lower()]
+        if type_filtered:
+            filtered = type_filtered
+    return filtered
+
+
+def format_hotels_as_cards(hotels: list[dict], checkin: str = "", checkout: str = "") -> list[dict]:
     """Convierte resultados de busqueda a formato de cards para el chat."""
     cards = []
     for h in hotels:
@@ -347,9 +441,15 @@ def format_hotels_as_cards(hotels: list[dict]) -> list[dict]:
             notes_parts.append(f"Check-out hasta {h['checkout_time']}")
         notes = " | ".join(notes_parts)
 
-        # Construir URL de Booking.com para el hotel
-        hotel_id = h.get("hotel_id", "")
-        booking_url = f"https://www.booking.com/hotel/x/{hotel_id}.html" if hotel_id else ""
+        # Construir URL de busqueda en Booking.com (la API no retorna URL directa)
+        hotel_name_query = h["name"].replace(" ", "+")
+        city_query = (h.get("city", "") or "").replace(" ", "+")
+        booking_url = f"https://www.booking.com/searchresults.html?ss={hotel_name_query}+{city_query}"
+        if checkin:
+            booking_url += f"&checkin={checkin}"
+        if checkout:
+            booking_url += f"&checkout={checkout}"
+        booking_url += "&group_adults=2&no_rooms=1"
 
         cards.append({
             "card_type": "hotel",
