@@ -14,5 +14,6 @@ pydantic>=2.0.0
 typing_extensions>=4.8.0
 httpx>=0.25.0
 fast-flights>=2.2.0
+airportsdata>=20250101
 mcp[cli]>=1.2.0
 supabase>=2.0.0

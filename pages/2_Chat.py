@@ -56,22 +56,25 @@ try:
     if _force_trip and _force_trip in selector_options:
         st.session_state.trip_selector_widget = _force_trip
 
-    # Determinar indice inicial basado en session_state
-    saved_selection = st.session_state.get("chat_selected_trip_id")
-    default_index = 0
-    if saved_selection and saved_selection in selector_options:
-        default_index = selector_options.index(saved_selection)
+    # Determinar indice inicial (solo si NO hay valor forzado en session_state)
+    selectbox_kwargs = {
+        "label": "Selecciona un viaje para chatear",
+        "options": selector_options,
+        "format_func": lambda k: selector_labels.get(k, k),
+        "key": "trip_selector_widget",
+    }
+    # Solo pasar index si el widget NO tiene valor previo en session_state
+    if "trip_selector_widget" not in st.session_state:
+        saved_selection = st.session_state.get("chat_selected_trip_id")
+        default_index = 0
+        if saved_selection and saved_selection in selector_options:
+            default_index = selector_options.index(saved_selection)
+        selectbox_kwargs["index"] = default_index
 
     # Layout: selector + boton "Nuevo Chat" en la misma fila
     sel_col, btn_col = st.columns([0.75, 0.25])
     with sel_col:
-        selected_key = st.selectbox(
-            "Selecciona un viaje para chatear",
-            options=selector_options,
-            format_func=lambda k: selector_labels.get(k, k),
-            index=default_index,
-            key="trip_selector_widget",
-        )
+        selected_key = st.selectbox(**selectbox_kwargs)
     with btn_col:
         st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
         _valid_selection = selected_key != _PLACEHOLDER

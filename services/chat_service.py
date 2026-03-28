@@ -204,11 +204,14 @@ def persist_chat(chat: dict) -> None:
     sb = get_supabase_client()
     chat_id = chat["chat_id"]
 
-    # Actualizar metadatos del chat
-    sb.table("chats").update({
+    # Actualizar metadatos del chat (incluye trip_id para cuando se asocia a un viaje recien creado)
+    update_data = {
         "title": chat.get("title", "Nueva conversacion"),
         "last_activity_at": chat.get("last_activity_at", datetime.now().isoformat()),
-    }).eq("chat_id", chat_id).execute()
+    }
+    if chat.get("trip_id"):
+        update_data["trip_id"] = chat["trip_id"]
+    sb.table("chats").update(update_data).eq("chat_id", chat_id).execute()
 
     # Re-sincronizar mensajes: borrar y reinsertar
     sb.table("chat_messages").delete().eq("chat_id", chat_id).execute()
