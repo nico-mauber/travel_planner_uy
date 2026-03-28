@@ -365,15 +365,6 @@ def _search_serpapi(
     else:
         params["type"] = "2"  # one way
 
-    ck = _make_cache_key(
-        "serpapi_flights", origin=origin, destination=destination,
-        departure_date=departure_date, return_date=return_date,
-        adults=str(adults), cabin_class=cabin_class,
-    )
-    cached = _cache_get(ck)
-    if cached is not None:
-        return cached[:max_results]
-
     try:
         with httpx.Client(timeout=35) as client:
             resp = client.get(
@@ -469,7 +460,6 @@ def _search_serpapi(
             "_source": "serpapi",
         })
 
-    _cache_set(ck, flights)
     return flights[:max_results]
 
 

@@ -17,6 +17,22 @@ from config.llm_config import DEFAULT_MODEL, EXTRACTION_TEMPERATURE
 
 logger = logging.getLogger(__name__)
 
+# Singleton para validacion de codigos IATA (carga una sola vez)
+_IATA_DB: Optional[dict] = None
+
+
+def _get_iata_db() -> dict:
+    """Retorna base de datos de codigos IATA (singleton, carga una sola vez)."""
+    global _IATA_DB
+    if _IATA_DB is None:
+        try:
+            import airportsdata
+            _IATA_DB = airportsdata.load("IATA")
+            logger.info("[iata_db] Cargado: %d aeropuertos", len(_IATA_DB))
+        except ImportError:
+            _IATA_DB = {}
+    return _IATA_DB
+
 
 # ─── Schema Pydantic para structured output ───
 
@@ -643,20 +659,15 @@ def _post_validate(
                 result.flight_destination = None
             else:
                 result.flight_destination = dest
-        # Validar códigos IATA contra base de datos real
-        _iata_db = None
-        try:
-            import airportsdata
-            _iata_db = airportsdata.load("IATA")
-        except ImportError:
-            pass
+        # Validar códigos IATA contra base de datos real (singleton)
+        iata_db = _get_iata_db()
         for attr in ("flight_origin_iata", "flight_destination_iata"):
             val = getattr(result, attr)
             if val:
                 val = val.strip().upper()
                 if len(val) != 3 or not val.isalpha():
                     setattr(result, attr, None)
-                elif _iata_db and val not in _iata_db:
+                elif iata_db and val not in iata_db:
                     setattr(result, attr, None)  # código no existe
                 else:
                     setattr(result, attr, val)

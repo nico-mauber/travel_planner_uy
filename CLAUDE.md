@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Proyecto
 
-Trip Planner — MVP de un agente de planificacion de viajes con interfaz Streamlit. Multi-usuario con Google OAuth (fallback a modo demo sin auth). Persistencia en Supabase (PostgreSQL). Agente conversacional dual: LLM (OpenAI gpt-4.1-nano via LangGraph) cuando `OPENAI_API_KEY` esta presente, o fallback basico. Extraccion inteligente de items via LLM structured output (ChatOpenAI.with_structured_output + Pydantic) con fallback a keywords. Integracion opcional con Booking.com (RapidAPI) para busqueda de hoteles. Servidor MCP standalone para exponer herramientas de busqueda de hoteles.
+Trip Planner — MVP de un agente de planificacion de viajes con interfaz Streamlit. Multi-usuario con Google OAuth (fallback a modo demo sin auth). Persistencia en Supabase (PostgreSQL). Agente conversacional LLM-only (OpenAI gpt-5-nano via LangGraph). Extraccion inteligente via LLM structured output (ChatOpenAI.with_structured_output + Pydantic). Sin fallback por keywords — requiere `OPENAI_API_KEY`. Integracion opcional con Booking.com (RapidAPI) para busqueda de hoteles. Servidor MCP standalone para exponer herramientas de busqueda de hoteles.
 
 ## Comandos
 
@@ -44,11 +44,11 @@ En `.env` (cargado con `load_dotenv(override=True)` al inicio de `app.py` — `o
 |---|---|---|
 | `SUPABASE_URL` | **Si** | URL del proyecto Supabase |
 | `SUPABASE_SERVICE_KEY` | **Si** | Service role key de Supabase (bypasea RLS) |
-| `OPENAI_API_KEY` | No | Habilita OpenAI gpt-4.1-nano LLM. Sin ella, solo funciona pattern matching para acciones |
+| `OPENAI_API_KEY` | **Si** | Habilita OpenAI gpt-5-nano LLM. Sin ella, el chat muestra "IA no disponible" |
 | `OPENAI_PROJECT` | No | Project ID de OpenAI (usado automaticamente por el SDK) |
 | `RAPIDAPI_KEY` | No | Habilita busqueda de hoteles reales via Booking.com (DataCrawler) |
 | `RAPIDAPI_BOOKING_HOST` | No | Host de la API (default: `booking-com15.p.rapidapi.com`) |
-| `SERPAPI_KEY` | No | Habilita busqueda de vuelos via SerpAPI Google Flights (backend primario estable). Sin ella, usa fast-flights (scraper directo) como fallback |
+| `SERPAPI_KEY` | No | Habilita busqueda de vuelos via SerpAPI Google Flights (backend primario estable, `deep_search=true`). Sin ella, usa fast-flights (scraper directo) como fallback |
 
 OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Google (ver `secrets.toml.example`).
 
@@ -61,10 +61,10 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 ### Capas
 
 - **`app.py`** — Punto de entrada. Configura `st.set_page_config(layout="wide")`, inyecta CSS global, ejecuta guard de autenticacion, inicializa `session_state`, sincroniza `active_trip_id` desde `chat_selected_trip_id`, configura `st.navigation()` con 7 paginas, renderiza sidebar con viaje activo. Carga `.env` con `load_dotenv()` al inicio.
-- **`services/`** — Logica de negocio pura (sin Streamlit). 16 servicios (ver seccion Servicios).
+- **`services/`** — Logica de negocio pura (sin Streamlit). 18 servicios (ver seccion Servicios).
 - **`pages/`** — 7 paginas Streamlit. Dashboard, Itinerario y Presupuesto tienen selector de viaje propio. Cronograma muestra todos los viajes. Chat tiene selector obligatorio.
 - **`components/`** — 5 widgets reutilizables que reciben datos y retornan acciones del usuario como dicts (ej: `{"action": "accept", "item_id": "..."}`).
-- **`config/`** — `settings.py` (Enums, paletas de colores, iconos, labels en espanol, `DEMO_USER_ID`) y `llm_config.py` (modelo OpenAI `gpt-4.1-nano`, temperaturas para chat y extraccion, embeddings).
+- **`config/`** — `settings.py` (Enums, paletas de colores, iconos, labels en espanol, `DEMO_USER_ID`) y `llm_config.py` (modelo OpenAI `gpt-5-nano`, temperaturas para chat y extraccion, embeddings).
 - **`models/`** — Dataclasses con `to_dict()`/`from_dict()` (Trip, ItineraryItem, Budget, UserProfile, Feedback). No se usan en runtime — los services operan directo sobre dicts.
 - **`data/`** — `sample_data.py` (viajes demo) + `llm_data/` (ChromaDB + checkpoints, local).
 - **`mcp_servers/`** — Servidor MCP standalone (`booking_server.py`) que expone `buscar_destinos` y `buscar_hoteles` como tools via FastMCP (transporte stdio).
@@ -75,17 +75,17 @@ OAuth requiere adicionalmente `.streamlit/secrets.toml` con credenciales de Goog
 |---|---|
 | `supabase_client.py` | Cliente Supabase singleton. Lee `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` de `.env` |
 | `trip_service.py` | CRUD de viajes, agrupacion de items por dia, aceptar/descartar sugerencias, recalculo de presupuesto, sincronizacion con Supabase. Servicio central |
-| `agent_service.py` | Dispatcher principal del chat. LLM-only: una sola llamada al LLM detecta ALL intents y extrae datos (sin keywords/regex). Deteccion lazy (`_check_llm()`). Sanitizacion de input. `_dispatch_llm_intent()` rutea por intent. Sin LLM → "IA no disponible" |
+| `agent_service.py` | Dispatcher principal del chat. LLM-only: una sola llamada al LLM detecta intents y extrae datos. Deteccion lazy (`_check_llm()`). Sanitizacion de input. `_dispatch_llm_intent()` rutea por intent. Sin LLM → "IA no disponible" |
 | `item_utils.py` | Utilidades puras de validacion y construccion de items: `calculate_end_time()`, `validate_item_day_range()`, `detect_time_conflict()`, `build_item_confirmation_data()`, `new_item_draft()` |
-| `llm_item_extraction.py` | Extraccion inteligente via LLM structured output (`ChatOpenAI.with_structured_output` + schema Pydantic `ItemExtractionResult`). Detecta intent + extrae TODOS los datos en una sola llamada: items, vuelos (flight_origin), hoteles (hotel_type/location/price), viajes (trip_start_date/end_date), cantidad de resultados (result_count). Post-validacion defensiva |
-| `trip_creation_flow.py` | Flujo multi-turn de creacion de viajes desde el chat. Extraccion de destino y fechas con regex (robusto para espanol), validacion de fechas. `detect_cancel_intent()` para cancelar flujos. Logica pura sin Streamlit |
+| `llm_item_extraction.py` | Extraccion inteligente via LLM structured output (`ChatOpenAI.with_structured_output` + schema Pydantic `ItemExtractionResult`). Detecta intent + extrae TODOS los datos en una sola llamada: items, vuelos (flight_origin/flight_destination + codigos IATA), hoteles (hotel_type/location/price), viajes (trip_start_date/end_date/trip_name), cantidad de resultados (result_count). Post-validacion defensiva |
+| `trip_creation_flow.py` | Flujo multi-turn de creacion de viajes desde el chat. Extraccion de destino y fechas con regex (robusto para espanol), validacion de fechas. Logica pura sin Streamlit |
 | `auth_service.py` | OAuth condicional (Authlib + secrets.toml). Guard `require_auth()`. CRUD de usuarios en Supabase |
 | `chat_service.py` | Multi-conversacion por usuario. CRUD de chats, auto-titulo, persistencia en Supabase |
 | `llm_agent_service.py` | Wrapper delgado sobre `TripChatbot`. Importa condicionalmente |
 | `llm_chatbot.py` | `TripChatbot` (singleton). Pipeline LangGraph de 4 nodos: memory_retrieval -> context_optimization -> response_generation -> memory_extraction |
 | `memory_manager.py` | `TripMemoryManager`. ChromaDB para memorias vectoriales (importancia >= 2), SQLite para checkpoints LangGraph. Datos en `data/llm_data/` |
 | `booking_service.py` | Cliente Booking.com via RapidAPI (DataCrawler). Cache en memoria (1h TTL) |
-| `flight_service.py` | Busqueda de vuelos. Dual backend: SerpAPI Google Flights (primario, requiere `SERPAPI_KEY`) + fast-flights (fallback scraper, sin API key). Cache en memoria (30 min TTL). Funciones: `search_flights()`, `search_flights_for_trip()`, `format_flights_as_cards()`, `get_airport_code()`, `is_flights_available()` |
+| `flight_service.py` | Busqueda de vuelos. Dual backend: SerpAPI Google Flights (primario, `deep_search=true`, requiere `SERPAPI_KEY`) + fast-flights (fallback scraper, sin API key). `_AIRPORT_INDEX` con 6500+ entradas via `airportsdata`. Cache en memoria (30 min TTL). Funciones: `search_flights()`, `search_flights_for_trip()`, `format_flights_as_cards()`, `get_airport_code()`, `is_flights_available()` |
 | `expense_service.py` | CRUD de gastos directos (`expenses`) no asociados a items del itinerario. Funciones: `load_expenses()`, `add_expense()`, `update_expense()`, `remove_expense()`, `format_existing_expenses()`. IDs con formato `exp-{hex8}` |
 | `budget_service.py` | Calculo de resumen de presupuesto por categoria. Acepta `items` y `expenses` (gastos directos). Excluye items sugeridos. Retorna `total_estimated`, `total_real`, `total_expenses`, `by_category` |
 | `profile_service.py` | Preferencias de usuario. Persistencia en Supabase |
@@ -159,7 +159,7 @@ Tablas en Supabase (PostgreSQL):
 **Flujo de ruteo en `agent_service.py`** (secuencial):
 1. **Sanitizar input** (`_sanitize_user_input`) — regex de seguridad contra prompt injection
 2. **LLM extraction UNICA** — si hay LLM + viaje activo, UNA sola llamada a `_llm_extract_fn()` que retorna `ItemExtractionResult` con intent + todos los datos extraidos
-3. **Flujo multi-turn de creacion de viaje** — si hay draft activo. `detect_cancel_intent()` para cancelar
+3. **Flujo multi-turn de creacion de viaje** — si hay draft activo
 4. **Escape de draft de item** — si el LLM clasifico como intent distinto de `add_item`, cancela el draft automaticamente
 5. **Flujo multi-turn de creacion de item** — si hay draft activo. Usa `llm_result` directamente (sin 2da llamada LLM)
 6. **Sin viaje activo** → LLM chat
@@ -172,9 +172,9 @@ Tablas en Supabase (PostgreSQL):
 
 **Extraccion inteligente via LLM** (`llm_item_extraction.py`):
 - `ChatOpenAI.with_structured_output(ItemExtractionResult)` — una sola llamada detecta intent y extrae TODOS los datos
-- Schema Pydantic `ItemExtractionResult` (27 campos): intent, name, day, start_time, end_time, item_type, location, cost, is_complete, missing_fields, follow_up_question, remove_item_ids, remove_all, remove_summary, trip_destination, trip_start_date, trip_end_date, trip_name, expense_category, expense_id, expense_amount, remove_all_expenses, hotel_type, hotel_location, hotel_max_price, flight_origin, result_count
+- Schema Pydantic `ItemExtractionResult` (30 campos): intent, name, day, start_time, end_time, item_type, location, cost, is_complete, missing_fields, follow_up_question, remove_item_ids, remove_all, remove_summary, trip_destination, trip_start_date, trip_end_date, trip_name, expense_category, expense_id, expense_amount, remove_all_expenses, hotel_type, hotel_location, hotel_max_price, flight_origin, flight_destination, flight_origin_iata, flight_destination_iata, result_count
 - System prompt semantico: describe intenciones por significado, NO por keywords. El LLM entiende cualquier idioma/fraseo
-- Post-validacion defensiva (`_post_validate`): valida intent, item_type, rango de dias, formato de horas, flight_origin (sin digitos), result_count (1-10), fechas ISO para create_trip, merge con draft existente
+- Post-validacion defensiva (`_post_validate`): valida intent, item_type, rango de dias, formato de horas, flight_origin/flight_destination (sin digitos), codigos IATA (3 letras mayusculas validados contra `airportsdata`), result_count (1-10), fechas ISO para create_trip, merge con draft existente
 - Singleton `_extraction_llm` (ChatOpenAI con `EXTRACTION_TEMPERATURE=0` para determinismo)
 
 **Utilidades de items** (`item_utils.py`):
@@ -182,10 +182,10 @@ Tablas en Supabase (PostgreSQL):
 - Constantes: `_DEFAULT_DURATIONS` (horas por tipo), `_DEFAULT_TIMES` (horario default por tipo)
 
 **Creacion de viajes** (`trip_creation_flow.py`):
-- Flujo multi-turn con draft. `detect_cancel_intent()` para cancelar
+- Flujo multi-turn con draft
 - `extract_trip_data()` con regex robusto de fechas en espanol (6 formatos: rango cruzado, mismo mes, solo mes, ISO, numerico, individual)
 - Proteccion anti-duplicado: si hay viaje activo al mismo destino, no inicia creacion
-- El LLM detecta intent `create_trip` y extrae `trip_destination`, `trip_start_date`, `trip_end_date` — regex como fallback
+- El LLM detecta intent `create_trip` y extrae `trip_destination`, `trip_start_date`, `trip_end_date`
 
 **Multi-conversacion:** `chat_service.py` gestiona multiples chats por usuario. Cada chat tiene `{chat_id, user_id, trip_id, title, messages}`. Auto-genera titulo desde el primer mensaje. Persistido en Supabase (tablas `chats` + `chat_messages`).
 
@@ -198,13 +198,14 @@ Tablas en Supabase (PostgreSQL):
 - Flujo: `search_destinations(query)` -> `search_hotels(dest_id, checkin, checkout)` -> `format_hotels_as_cards()`.
 
 **Busqueda de vuelos (SerpAPI + Google Flights fallback):**
-- `flight_service.py` — Dual backend: SerpAPI Google Flights (primario, requiere `SERPAPI_KEY`) + fast-flights (fallback scraper, sin API key).
+- `flight_service.py` — Dual backend: SerpAPI Google Flights (primario, `deep_search=true`, requiere `SERPAPI_KEY`) + fast-flights (fallback scraper, sin API key).
 - Flujo: `search_flights(origin, destination, date)` -> `format_flights_as_cards()`.
 - `search_flights_for_trip(trip)` usa destino y fechas del viaje activo. Necesita ciudad de origen del usuario.
-- `get_airport_code(city_name)` mapea ciudades a codigos IATA (169 ciudades de Latam, Europa, NA, Asia, Africa).
-- Intent `flight_search` en el dispatcher: detectado por LLM semanticamente. El LLM extrae `flight_origin` (ciudad de origen) y `result_count` (cantidad de resultados).
+- `_AIRPORT_INDEX` con 6500+ entradas construido desde `airportsdata` (7800+ aeropuertos). `get_airport_code(city_name)` busca en el indice invertido ciudad→IATA.
+- El LLM extrae codigos IATA directamente (`flight_origin_iata`, `flight_destination_iata`) validados contra `airportsdata`. Tambien extrae `flight_origin`, `flight_destination` (ciudades) y `result_count`.
+- Intent `flight_search` en el dispatcher: detectado por LLM semanticamente.
 - Renderizado: `render_flight_results()` en chat_widget.py como tabla compacta HTML.
-- Cache en memoria con TTL de 1 hora. Si `RAPIDAPI_KEY` no esta configurada, retorna listas vacias.
+- Cache en memoria con TTL de 1 hora.
 
 **MCP Server:**
 - `mcp_servers/booking_server.py` — Servidor FastMCP standalone que expone `buscar_destinos` y `buscar_hoteles` como tools.
@@ -233,7 +234,7 @@ Tablas en Supabase (PostgreSQL):
 - Enums en `config/settings.py` usan valores en espanol (`"en_planificacion"`, `"confirmado"`, `"sugerido"`, etc.)
 - Persistencia: write-through a Supabase (tablas: users, profiles, trips, itinerary_items, chats, chat_messages, feedbacks)
 - Cada pagina envuelve su contenido en `try/except` con boton "Reintentar"
-- `OPENAI_API_KEY` en `.env` habilita el LLM; sin ella, solo funcionan acciones por pattern matching
+- `OPENAI_API_KEY` en `.env` habilita el LLM; sin ella, el chat muestra "IA no disponible"
 - Servicios que dependen de APIs externas (OpenAI, Booking.com) degradan graciosamente
 - Singletons para `TripChatbot`, `TripMemoryManager` y `_extraction_llm` (ChatOpenAI para extraccion) — una instancia por proceso
 
@@ -246,13 +247,14 @@ Tablas en Supabase (PostgreSQL):
 | `plotly>=5.18.0` | Charts de presupuesto (donut, barras) |
 | `streamlit-calendar>=1.2.0` | Vista calendario FullCalendar.js |
 | `python-dotenv>=1.0.0` | Carga de `.env` |
-| `langchain-openai`, `langgraph`, `langgraph-checkpoint-sqlite` | Pipeline LLM con OpenAI gpt-4.1-nano |
+| `langchain-openai`, `langgraph`, `langgraph-checkpoint-sqlite` | Pipeline LLM con OpenAI gpt-5-nano |
 | `langchain-chroma`, `chromadb` | Memoria vectorial |
 | `httpx>=0.25.0` | Cliente HTTP para Booking.com API y SerpAPI fallback |
 | `fast-flights>=2.2.0` | Scraper de Google Flights (fallback de busqueda de vuelos sin API key) |
 | `mcp[cli]>=1.2.0` | Servidor MCP (FastMCP) |
 | `supabase>=2.0.0` | Cliente Supabase (persistencia PostgreSQL) |
 | `pydantic>=2.0.0` | Modelos estructurados (memoria LLM + schema `ItemExtractionResult` para structured output) |
+| `airportsdata>=20250101` | Base de datos de 7800+ aeropuertos para mapeo IATA (`_AIRPORT_INDEX` en flight_service) |
 
 ## Documentacion de requerimientos
 

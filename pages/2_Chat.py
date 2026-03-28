@@ -425,7 +425,7 @@ try:
                                     "o empezar a planificar aqui mismo."
                                 ),
                             })
-                            persist_chat(active_chat)
+                            persist_chat(active_chat, full_sync=True)
                             st.session_state.user_chats = load_chats(user_id)
                         elif chat_trip:
                             result_msg = apply_confirmed_action(
@@ -439,7 +439,7 @@ try:
                                 "type": "text",
                                 "content": result_msg,
                             })
-                            persist_chat(active_chat)
+                            persist_chat(active_chat, full_sync=True)
                             st.session_state.user_chats = load_chats(user_id)
                         st.rerun()
 
@@ -454,7 +454,7 @@ try:
                             "type": "text",
                             "content": "Entendido, he cancelado la accion.",
                         })
-                        persist_chat(active_chat)
+                        persist_chat(active_chat, full_sync=True)
                         st.session_state.user_chats = load_chats(user_id)
                         st.rerun()
 
