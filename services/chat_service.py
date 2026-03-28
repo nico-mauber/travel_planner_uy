@@ -1,8 +1,11 @@
 """Servicio de gestion de conversaciones multiples — Supabase backend."""
 
 import uuid
+import logging
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def load_chats(user_id: str) -> list:
@@ -107,6 +110,38 @@ def delete_chat(chat_id: str, user_id: str = None) -> bool:
 
     sb.table("chats").delete().eq("chat_id", chat_id).execute()
     return True
+
+
+def delete_chats_for_trip(trip_id: str, user_id: str) -> int:
+    """Elimina todos los chats asociados a un viaje. CASCADE elimina mensajes.
+
+    Retorna cantidad de chats eliminados.
+    """
+    from services.supabase_client import get_supabase_client
+
+    logger.info("━━━ DELETE_CHATS_FOR_TRIP ━━━")
+    logger.info("  trip_id=%s, user_id=%s", trip_id, user_id)
+
+    if not trip_id or not user_id:
+        logger.warning("  RECHAZADO: trip_id o user_id vacios")
+        return 0
+
+    sb = get_supabase_client()
+    result = sb.table("chats").select("chat_id").eq("trip_id", trip_id).eq("user_id", user_id).execute()
+    logger.info("  Chats encontrados en Supabase: %d", len(result.data) if result.data else 0)
+    if result.data:
+        for chat in result.data:
+            logger.info("    chat_id=%s", chat.get("chat_id"))
+
+    if not result.data:
+        logger.info("  Sin chats asociados — nada que eliminar")
+        return 0
+
+    count = len(result.data)
+    logger.info("  Eliminando %d chats de Supabase...", count)
+    sb.table("chats").delete().eq("trip_id", trip_id).eq("user_id", user_id).execute()
+    logger.info("  Chats eliminados OK")
+    return count
 
 
 def rename_chat(chat_id: str, new_title: str, user_id: str = None) -> bool:

@@ -4,6 +4,7 @@ import os
 import re
 import time
 import logging
+import unicodedata
 from typing import Optional
 from urllib.parse import quote
 
@@ -101,6 +102,12 @@ _AIRPORT_CODES: dict[str, str] = {
     "florianopolis": "FLN",
     "porto alegre": "POA",
     "belo horizonte": "CNF",
+    "manaus": "MAO",
+    "manaos": "MAO",
+    "belem": "BEL",
+    "fortaleza": "FOR",
+    "curitiba": "CWB",
+    "natal": "NAT",
     # Europa
     "madrid": "MAD",
     "barcelona": "BCN",
@@ -255,17 +262,25 @@ def _make_cache_key(prefix: str, **kwargs) -> str:
 
 # ─── Funciones auxiliares ───
 
+def _strip_accents(s: str) -> str:
+    """Elimina acentos/diacriticos de un string (ej: Brasília → Brasilia)."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s)
+        if unicodedata.category(c) != "Mn"
+    )
+
+
 def get_airport_code(city_name: str) -> str:
     """Intenta mapear un nombre de ciudad a codigo IATA.
 
     Incluye un diccionario de aeropuertos comunes de Latinoamerica, Europa,
     Norteamerica, Asia, Oceania y Africa.
-    Si no encuentra, retorna el string original en mayusculas
-    (el usuario puede haber dado el codigo directamente).
+    Normaliza acentos para matchear (ej: Brasília → brasilia → BSB).
+    Si no encuentra, retorna el string original en mayusculas.
     """
     if not city_name:
         return ""
-    normalized = city_name.strip().lower()
+    normalized = _strip_accents(city_name.strip().lower())
     # Busqueda exacta
     if normalized in _AIRPORT_CODES:
         return _AIRPORT_CODES[normalized]
@@ -653,32 +668,30 @@ def search_flights(
 def search_flights_for_trip(
     trip: dict,
     origin: str = "",
+    destination_city: str = "",
     max_results: int = 5,
 ) -> list[dict]:
     """Busca vuelos usando el contexto del viaje activo.
 
-    Usa trip["destination"] como destino y trip["start_date"]/["end_date"] como fechas.
-    Si origin esta vacio, retorna lista vacia (se necesita el aeropuerto de origen).
+    Args:
+        trip: dict del viaje con destination, start_date, end_date
+        origin: ciudad de origen (extraida por el LLM)
+        destination_city: ciudad con aeropuerto mas cercana al destino (extraida por el LLM).
+            Si vacio, usa trip["destination"] como fallback.
+        max_results: cantidad maxima de vuelos a retornar
     """
     if not origin:
         return []
 
-    destination_raw = trip.get("destination", "")
-    if not destination_raw:
+    # Destino: preferir destination_city del LLM (ya es ciudad con aeropuerto)
+    dest_search = destination_city or trip.get("destination", "")
+    if not dest_search:
         return []
 
-    # Limpiar destino (quitar anos, numeros) y tomar parte antes de la coma
-    clean_dest = re.sub(r'\b\d{4}\b', '', destination_raw)
-    clean_dest = re.sub(r'\b\d+\b', '', clean_dest)
-    clean_dest = re.sub(r'\s+', ' ', clean_dest).strip()
-    search_term = clean_dest.split(",")[0].strip()
-
-    if not search_term:
-        return []
-
-    # Resolver codigos IATA
     origin_code = get_airport_code(origin)
-    dest_code = get_airport_code(search_term)
+    dest_code = get_airport_code(dest_search)
+    logger.info("[flights] origin='%s' -> %s, destination_city='%s' -> %s (trip.destination='%s')",
+                origin, origin_code, dest_search, dest_code, trip.get("destination", ""))
 
     departure_date = trip.get("start_date", "")
     return_date = trip.get("end_date", "")

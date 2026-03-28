@@ -131,6 +131,96 @@ class ItemExtractionResult(BaseModel):
             "(solo para intent 'remove_expense'). Ej: 'elimina todos los gastos', 'borra los gastos del viaje'"
         ),
     )
+    # ─── Campos para intent hotel_search ───
+    hotel_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "Tipo de alojamiento solicitado (solo para intent 'hotel_search'). "
+            "Valores: 'hotel', 'apartamento', 'hostel', 'resort', 'casa'. "
+            "Ej: 'busca apartamentos' → 'apartamento', 'quiero un hostel' → 'hostel'"
+        ),
+    )
+    hotel_location: Optional[str] = Field(
+        default=None,
+        description=(
+            "Ubicacion especifica, barrio o zona para la busqueda de hotel "
+            "(solo para intent 'hotel_search'). "
+            "Ej: 'hoteles en Carrasco' → 'Carrasco', 'cerca del centro' → 'centro'"
+        ),
+    )
+    hotel_max_price: Optional[float] = Field(
+        default=None,
+        description=(
+            "Precio maximo por noche en USD mencionado por el usuario "
+            "(solo para intent 'hotel_search'). "
+            "Ej: 'menos de 100 dolares' → 100, 'economico' → 80, 'barato' → 50"
+        ),
+    )
+    # ─── Campos para intent flight_search ───
+    flight_origin: Optional[str] = Field(
+        default=None,
+        description=(
+            "Ciudad de ORIGEN del vuelo (solo para intent 'flight_search'). "
+            "Ej: 'vuelos desde Buenos Aires' -> 'Buenos Aires', "
+            "'pasajes de Montevideo a Roma' -> 'Montevideo'. "
+            "IMPORTANTE: 'desde' seguido de FECHA no es origen. "
+            "'vuelos desde el 15 de abril' -> null (es fecha, no ciudad). "
+            "Si el usuario no menciona origen, dejar null."
+        ),
+    )
+    flight_destination: Optional[str] = Field(
+        default=None,
+        description=(
+            "Ciudad de DESTINO del vuelo con aeropuerto (solo para intent 'flight_search'). "
+            "Determina la ciudad con aeropuerto mas cercana al destino del viaje. "
+            "Ej: destino 'Amazonas, cerca de Manaos' -> 'Manaus', "
+            "destino 'Machu Picchu' -> 'Cusco', "
+            "destino 'Costa Amalfitana' -> 'Napoles', "
+            "destino 'Roma' -> 'Roma'. "
+            "Si el destino del viaje YA es una ciudad con aeropuerto, usarla directamente. "
+            "Si es una region/zona, inferir la ciudad con aeropuerto mas logica."
+        ),
+    )
+    # ─── Campo compartido: cantidad de resultados ───
+    result_count: Optional[int] = Field(
+        default=None,
+        description=(
+            "Cantidad de resultados solicitados (para 'hotel_search' y 'flight_search'). "
+            "Ej: 'dame 3 hoteles' -> 3, 'cinco vuelos' -> 5, 'nine flights' -> 9. "
+            "IMPORTANTE: NO confundir con atributos del item. "
+            "'hotel de 3 estrellas' NO es result_count=3. "
+            "'vuelo con 2 escalas' NO es result_count=2. "
+            "Solo es result_count si modifica la CANTIDAD de resultados a mostrar. "
+            "Si no se especifica, dejar null. Rango: 1-10."
+        ),
+    )
+    # ─── Campos para intent create_trip (extraccion completa) ───
+    trip_start_date: Optional[str] = Field(
+        default=None,
+        description=(
+            "Fecha de INICIO del viaje en formato ISO YYYY-MM-DD "
+            "(solo para intent 'create_trip'). "
+            "Convierte: 'del 15 de abril' -> YYYY-04-15, 'en julio' -> YYYY-07-01. "
+            "Si el mes ya paso en el ano actual, usar ano siguiente. "
+            "NO inventes fechas si el usuario no las menciona."
+        ),
+    )
+    trip_end_date: Optional[str] = Field(
+        default=None,
+        description=(
+            "Fecha de FIN del viaje en formato ISO YYYY-MM-DD "
+            "(solo para intent 'create_trip'). "
+            "Ej: 'al 22 de abril' -> YYYY-04-22, 'en julio' -> YYYY-07-07 (1 semana default). "
+            "NO inventes fechas si el usuario no las menciona."
+        ),
+    )
+    trip_name: Optional[str] = Field(
+        default=None,
+        description=(
+            "Nombre personalizado del viaje si el usuario lo menciona "
+            "(solo para intent 'create_trip'). Si no se menciona, dejar null."
+        ),
+    )
 
 
 # ─── Singleton ChatOpenAI para extraccion ───
@@ -201,12 +291,68 @@ IMPORTANTE sobre create_trip vs add_item:
 - Si hay un viaje activo y el mensaje parece referirse a una actividad del viaje actual → add_item
 
 IMPORTANTE sobre hotel_search vs add_item:
-- Quiere explorar opciones de hospedaje sin datos concretos → hotel_search
-- Quiere agregar un alojamiento especifico con datos concretos (nombre, dia, hora) → add_item
+- Verbos como "recomendar", "buscar", "mostrar", "encontrar", "sugerir" + hotel/hospedaje/hostel/apartamento/alojamiento → hotel_search SIEMPRE
+- "recomiendame hoteles", "busca hotel", "donde puedo dormir", "quiero un hostel", "hoteles buenos en X", "alojamiento economico", "donde me quedo" → hotel_search
+- Solo es add_item tipo alojamiento si el usuario da NOMBRE ESPECIFICO + DIA + HORA concretos. Ej: "agregar Hotel Marriott el dia 3 check-in a las 15:00" → add_item
+- En caso de CUALQUIER duda entre hotel_search y add_item → hotel_search
+
+Si la intencion es "hotel_search", EXTRAE tambien estos campos opcionales:
+- hotel_type: tipo de alojamiento si el usuario lo menciona. Valores validos: "hotel", "apartamento", "hostel", "resort", "casa". Ej: "busca apartamentos" → "apartamento", "quiero un hostel barato" → "hostel"
+- hotel_location: barrio, zona o ubicacion especifica si se menciona. Ej: "hoteles en Carrasco" → "Carrasco", "alojamiento en Vicalvaro" → "Vicalvaro", "cerca de la playa" → "playa"
+- hotel_max_price: presupuesto maximo por noche en USD. Ej: "menos de 100 dolares" → 100.0. Si dice "economico" o "barato" usa 80.0. Si dice "de lujo" o "premium" no pongas limite
 
 IMPORTANTE sobre flight_search vs add_item:
-- Quiere buscar/explorar/comparar vuelos sin datos concretos de dia/hora en el itinerario → flight_search
-- Quiere agregar un vuelo especifico con dia, hora, aerolinea concretos al itinerario → add_item
+- Verbos como "recomendar", "buscar", "mostrar", "encontrar", "ver" + vuelo/pasaje/avion/aerolinea → flight_search SIEMPRE
+- "recomiendame vuelos", "busca pasajes", "vuelos baratos", "quiero ver vuelos", "pasajes a X" → flight_search
+- Solo es add_item tipo vuelo si el usuario da AEROLINEA + DIA + HORA concretos. Ej: "agregar vuelo LATAM dia 1 a las 08:30" → add_item
+- En caso de CUALQUIER duda entre flight_search y add_item → flight_search
+
+IMPORTANTE sobre hotel_search vs flight_search:
+- Si el mensaje menciona hotel/hostel/apartamento/alojamiento/hospedaje/donde dormir → hotel_search SIEMPRE, aunque mencione una ciudad como "Buenos Aires"
+- "apartamentos en Palermo Buenos Aires" → hotel_search (busca alojamiento, "Buenos Aires" es parte de la ubicacion, NO un origen de vuelo)
+- "hoteles en Buenos Aires" → hotel_search (NO flight_search)
+- Solo es flight_search si menciona explicitamente vuelo/pasaje/avion/volar SIN mencionar alojamiento
+- Si el mensaje menciona TANTO alojamiento como vuelo, prioriza el tipo principal: "hotel cerca del aeropuerto" → hotel_search
+
+Si la intencion es "flight_search", EXTRAE tambien estos campos opcionales:
+- flight_origin: ciudad desde donde el usuario quiere volar. Identifica semanticamente sin importar idioma o estructura de la frase.
+  * "vuelos desde Buenos Aires" → "Buenos Aires"
+  * "busca pasajes de Montevideo a Roma" → "Montevideo"
+  * "flights from Santiago" → "Santiago"
+  * CRITICO: "desde" seguido de FECHA no es origen: "vuelos desde el 15 de abril" → null, "vuelos desde el lunes" → null
+  * Si el usuario NO menciona origen, dejar null (el sistema le pedira que lo indique)
+- flight_destination: ciudad con aeropuerto mas cercana al DESTINO del viaje actual. Usa el contexto del viaje para inferir:
+  * Destino "Amazonas, cerca de Manaos" → "Manaus" (ciudad con aeropuerto)
+  * Destino "Machu Picchu" → "Cusco" (aeropuerto mas cercano)
+  * Destino "Costa Amalfitana, Italia" → "Napoles" (aeropuerto mas cercano)
+  * Destino "Roma" → "Roma" (ya es ciudad con aeropuerto)
+  * Destino "Punta del Este, Uruguay" → "Punta del Este" o "Montevideo"
+  * Si el destino YA es una ciudad con aeropuerto, usarla directamente
+- result_count: cantidad de resultados si la especifica (ver regla global mas abajo)
+
+CAMPO GLOBAL — result_count (aplica a hotel_search Y flight_search):
+- Extrae la cantidad SOLO cuando el usuario pide explicitamente N resultados
+- Numeros en cualquier idioma o formato: "3 hoteles"→3, "cinco vuelos"→5, "nine flights"→9
+- Expresiones coloquiales: "un par"→2, "algunos"→3, "varios"→5
+- NUNCA confundir con atributos: "hotel de 3 estrellas", "vuelo con 2 escalas", "habitacion para 3 personas" NO son result_count
+- Solo es result_count si el numero modifica la CANTIDAD de resultados a mostrar
+- Si el usuario NO menciona cantidad, dejar null (el sistema usara un default de 5)
+- Rango valido: 1 a 10. Si pide mas de 10, usar 10
+
+Si la intencion es "create_trip", EXTRAE tambien estos campos adicionales:
+- trip_destination: (ya existente) destino del viaje
+- trip_start_date: fecha de inicio en formato ISO YYYY-MM-DD. Interpreta:
+  * Fechas con mes: "del 15 de abril" → YYYY-04-15 (infiere ano: si el mes ya paso este ano, usar el siguiente)
+  * Fechas numericas: "15/06/2026" → "2026-06-15"
+  * Solo mes: "en julio" → YYYY-07-01 (primer dia del mes)
+  * Relativas: "la proxima semana" → calcular fecha concreta desde {today}
+- trip_end_date: fecha de fin en formato ISO YYYY-MM-DD. Mismas reglas de interpretacion
+  * Si solo se menciona un mes: "en julio" → YYYY-07-07 (una semana por defecto)
+  * "del 15 al 22 de abril" → trip_start_date=YYYY-04-15, trip_end_date=YYYY-04-22
+- trip_name: nombre personalizado del viaje SOLO si el usuario lo menciona explicitamente
+  * "crear viaje llamado Vacaciones Europa" → "Vacaciones Europa"
+  * Si no se menciona, dejar null
+- IMPORTANTE: NO inventes fechas. Si el usuario dice "quiero ir a Japon" sin fechas, deja trip_start_date y trip_end_date en null
 
 IMPORTANTE sobre add_expense vs add_item:
 - Si el usuario habla de un GASTO o COSTO sin datos de itinerario (dia, hora) → add_expense (es un costo para el presupuesto)
@@ -450,6 +596,63 @@ def _post_validate(
         if result.expense_id not in existing_expense_ids:
             result.expense_id = None
 
+    # ─── Validar flight_origin y flight_destination ───
+    if result.intent != "flight_search":
+        result.flight_origin = None
+        result.flight_destination = None
+    else:
+        if result.flight_origin:
+            origin = result.flight_origin.strip().rstrip(".,;:!?")
+            if len(origin) < 2 or len(origin) > 100 or re.search(r'\d', origin):
+                result.flight_origin = None
+            else:
+                result.flight_origin = origin
+        if result.flight_destination:
+            dest = result.flight_destination.strip().rstrip(".,;:!?")
+            if len(dest) < 2 or len(dest) > 100 or re.search(r'\d', dest):
+                result.flight_destination = None
+            else:
+                result.flight_destination = dest
+
+    # ─── Validar result_count ───
+    if result.result_count is not None:
+        if result.intent not in ("hotel_search", "flight_search"):
+            result.result_count = None
+        else:
+            result.result_count = max(1, min(result.result_count, 10))
+
+    # ─── Validar campos de create_trip ───
+    if result.intent != "create_trip":
+        result.trip_start_date = None
+        result.trip_end_date = None
+        result.trip_name = None
+    else:
+        _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+        for attr in ("trip_start_date", "trip_end_date"):
+            val = getattr(result, attr)
+            if val:
+                if not _ISO_DATE.match(val):
+                    setattr(result, attr, None)
+                    continue
+                try:
+                    date.fromisoformat(val)
+                except ValueError:
+                    setattr(result, attr, None)
+        if result.trip_start_date and result.trip_end_date:
+            if result.trip_end_date < result.trip_start_date:
+                result.trip_start_date, result.trip_end_date = (
+                    result.trip_end_date, result.trip_start_date
+                )
+        if result.trip_name:
+            name = result.trip_name.strip()
+            result.trip_name = name if 2 <= len(name) <= 100 else None
+
+    # Limpiar hotel fields si no es hotel_search
+    if result.intent != "hotel_search":
+        result.hotel_type = None
+        result.hotel_location = None
+        result.hotel_max_price = None
+
     # Merge con draft existente (el LLM puede no repetir datos del draft)
     if draft:
         if not result.name and draft.get("name"):
@@ -552,15 +755,22 @@ def extract_item_with_llm(
 
         result = structured_llm.invoke(messages)
 
+        logger.info("━━━ LLM RAW RESULT (antes de _post_validate) ━━━")
+        logger.info("  intent=%s", result.intent)
+        logger.info("  name=%s, day=%s, item_type=%s", result.name, result.day, result.item_type)
+        logger.info("  flight_origin=%s, result_count=%s", result.flight_origin, result.result_count)
+        logger.info("  hotel_type=%s, hotel_location=%s, hotel_max_price=%s",
+                    result.hotel_type, result.hotel_location, result.hotel_max_price)
+        logger.info("  trip_destination=%s, trip_start=%s, trip_end=%s",
+                    result.trip_destination, result.trip_start_date, result.trip_end_date)
+        logger.info("  history_msgs=%d mensajes pasados al LLM", len(history_msgs))
+
         # Post-validacion defensiva
         result = _post_validate(result, trip, partial_draft)
 
-        logger.info(
-            "[llm_extraction] intent=%s, name=%s, day=%s, type=%s, complete=%s, "
-            "remove_ids=%s, remove_all=%s",
-            result.intent, result.name, result.day, result.item_type, result.is_complete,
-            result.remove_item_ids, result.remove_all,
-        )
+        logger.info("━━━ LLM POST-VALIDATE RESULT ━━━")
+        logger.info("  intent=%s, name=%s, day=%s, type=%s, complete=%s",
+                    result.intent, result.name, result.day, result.item_type, result.is_complete)
 
         return result
 

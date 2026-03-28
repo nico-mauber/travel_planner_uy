@@ -8,18 +8,16 @@ from typing import Optional
 
 from config.settings import ItemType, ItemStatus
 from services.trip_creation_flow import (
-    detect_trip_creation_intent, detect_cancel_intent,
+    detect_cancel_intent,
     extract_trip_data, get_missing_fields, build_prompt_for_missing,
     validate_dates, build_confirmation_data, new_draft,
 )
-from services.item_extraction import (
-    detect_add_item_intent, extract_item_data, get_missing_item_fields,
+from services.item_utils import (
+    get_missing_item_fields,
     build_item_prompt_for_missing, validate_item_day_range,
     detect_time_conflict, build_item_confirmation_data,
     new_item_draft, calculate_end_time,
-    detect_cancel_intent as detect_item_cancel_intent,
-    detect_calendar_intent, detect_hotel_intent, detect_flight_intent, detect_remove_item_intent,
-    _ORDINAL_NAMES,
+    _DEFAULT_TIMES,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +60,7 @@ _USE_BOOKING = False
 try:
     from services.booking_service import (
         is_booking_available, search_hotels_for_trip, format_hotels_as_cards,
+        _filter_hotels,
     )
     _USE_BOOKING = is_booking_available()
 except ImportError:
@@ -124,38 +123,6 @@ def is_flights_active() -> bool:
     return _USE_FLIGHTS
 
 
-# ─── Constantes compiladas para deteccion de preguntas informativas ───
-_DATA_INDICATORS = [
-    re.compile(r"\bdia\s+\d+"),
-    re.compile(r"\d{1,2}[:.]\d{2}"),
-    re.compile(r"\bmanana\b"),
-    re.compile(r"\btarde\b"),
-    re.compile(r"\bnoche\b"),
-    re.compile(rf"\b(?:{_ORDINAL_NAMES})\s+dia"),
-    re.compile(rf"\bdia\s+(?:{_ORDINAL_NAMES})\b"),
-    re.compile(r"\b(?:ultimo|último|penultimo|penúltimo)\s+dia"),
-]
-
-_QUESTION_STARTERS = [
-    "que ", "cual ", "cuando ", "donde ", "cuanto ", "como ",
-    "por que ", "cuales ", "cuantos ",
-]
-
-
-def _is_informative_question(msg: str) -> bool:
-    """Detecta si el mensaje es una pregunta informativa (no datos para un draft).
-
-    Permite que preguntas como "que dias son mi viaje?" escapen del flujo
-    multi-turn de item creation y lleguen al LLM/fallback.
-    """
-    lower = msg.lower().strip()
-    if "?" not in lower and "\u00bf" not in lower:
-        return False
-    # Si contiene datos validos para el draft, NO es pregunta informativa
-    for pattern in _DATA_INDICATORS:
-        if pattern.search(lower):
-            return False
-    return any(lower.startswith(qs) or f" {qs}" in lower for qs in _QUESTION_STARTERS)
 
 
 def process_message(message: str, trip: Optional[dict] = None,
@@ -164,67 +131,118 @@ def process_message(message: str, trip: Optional[dict] = None,
                     trip_creation_draft: Optional[dict] = None,
                     item_creation_draft: Optional[dict] = None,
                     chat_history: Optional[list] = None) -> dict:
-    """Procesa un mensaje del usuario via LLM y/o Booking.com.
+    """Procesa un mensaje del usuario via LLM.
 
     Retorna dict con:
       - role: "assistant"
-      - type: "text" | "card" | "confirmation" | "hotel_results"
+      - type: "text" | "card" | "confirmation" | "hotel_results" | "flight_results"
       - content: str (texto) o dict (datos de tarjeta/confirmación)
       - _trip_creation_draft: (opcional) estado parcial del flujo de creación
     """
-    # Inicializar detección de LLM (lazy, solo la primera vez)
     _check_llm()
 
-    # Sanitizar input contra prompt injection antes de procesarlo
+    # Paso 0: Sanitizar input contra prompt injection
     message = _sanitize_user_input(message)
     msg = message.lower().strip()
+    logger.info("━━━ PROCESS_MESSAGE ━━━")
+    logger.info("  mensaje: %s", message[:120])
+    logger.info("  trip: %s", trip.get("destination") if trip else "None")
+    logger.info("  LLM disponible: extract=%s, chat=%s", bool(_llm_extract_fn), bool(_llm_process_fn))
 
-    # ─── Flujo multi-turn de creación de viaje ───
+    # Paso 1: LLM extraction UNICA (con o sin viaje activo)
+    llm_result = None
+    if _llm_extract_fn:
+        target_trip = trip
+        if not trip:
+            # Trip minimo para permitir deteccion de create_trip sin viaje activo
+            target_trip = {"destination": "", "start_date": "", "end_date": "", "items": [], "expenses": []}
+        partial = (item_creation_draft
+                   if item_creation_draft and item_creation_draft.get("step") == "collecting"
+                   else None)
+        logger.info("  [Paso 1] Llamando _llm_extract_fn (trip=%s, partial_draft=%s)",
+                    "activo" if trip else "vacio", bool(partial))
+        llm_result = _llm_extract_fn(
+            message, target_trip,
+            partial_draft=partial,
+            chat_history=chat_history,
+        )
+        if llm_result:
+            logger.info("  [Paso 1] LLM result:")
+            logger.info("    intent=%s", llm_result.intent)
+            logger.info("    name=%s, day=%s, item_type=%s", llm_result.name, llm_result.day, llm_result.item_type)
+            logger.info("    flight_origin=%s, result_count=%s", llm_result.flight_origin, llm_result.result_count)
+            logger.info("    hotel_type=%s, hotel_location=%s, hotel_max_price=%s",
+                        llm_result.hotel_type, llm_result.hotel_location, llm_result.hotel_max_price)
+            logger.info("    trip_destination=%s, trip_start_date=%s, trip_end_date=%s",
+                        llm_result.trip_destination, llm_result.trip_start_date, llm_result.trip_end_date)
+            logger.info("    is_complete=%s, missing=%s", llm_result.is_complete, llm_result.missing_fields)
+        else:
+            logger.warning("  [Paso 1] LLM retorno None (error)")
+
+    # Paso 1.5: Sin viaje activo + intent detectado por LLM
+    if not trip and llm_result:
+        if llm_result.intent == "create_trip":
+            logger.info("  [Paso 1.5] Sin trip + intent create_trip → iniciar creacion")
+            result = _handle_create_trip_from_llm(llm_result, message, trip)
+            if result is not None:
+                return result
+        elif llm_result.intent in ("flight_search", "hotel_search", "add_item",
+                                    "remove_item", "calendar_event",
+                                    "add_expense", "modify_expense", "remove_expense"):
+            logger.info("  [Paso 1.5] Sin trip + intent %s → necesita viaje activo", llm_result.intent)
+            return {
+                "role": "assistant",
+                "type": "text",
+                "content": (
+                    "Para eso necesito que tengas un **viaje activo**. "
+                    "Selecciona un viaje en el selector de arriba, o dime a donde quieres ir "
+                    "para crear uno nuevo."
+                ),
+            }
+
+    # Paso 2: Flujo multi-turn de creacion de viaje (draft activo)
     result = _handle_trip_creation_flow(msg, message, trip, trip_creation_draft)
     if result is not None:
+        logger.info("  [Paso 2] Trip creation flow manejo el mensaje")
         return result
 
-    # ─── Flujo multi-turn de creacion de item (REQ-CF-003) ───
-    result = _handle_item_creation_flow(msg, message, trip, item_creation_draft, chat_history=chat_history)
+    # Paso 3: Escape de draft de item via LLM
+    if item_creation_draft and item_creation_draft.get("step") == "collecting":
+        if llm_result and llm_result.intent not in ("add_item", "unknown", "informative"):
+            logger.info("  [Paso 3] Escapando draft de item (intent=%s)", llm_result.intent)
+            item_creation_draft = None
+            _clear_session_draft("_item_creation_draft")
+
+    # Paso 4: Flujo multi-turn de creacion de item
+    result = _handle_item_creation_flow(
+        msg, message, trip, item_creation_draft,
+        chat_history=chat_history, llm_result=llm_result,
+    )
     if result is not None:
+        logger.info("  [Paso 4] Item creation flow manejo el mensaje")
         return result
 
-    # ─── Sin viaje activo y keywords no matchearon: LLM chat como fallback ───
+    # Paso 5: Sin viaje activo y sin intent accionable → LLM chat
     if not trip and _USE_LLM and _llm_process_fn:
+        logger.info("  [Paso 5] Sin viaje + sin intent accionable → LLM chat")
         return _llm_chat_response(message, None, user_id, chat_id)
 
-    # ─── PATH CON LLM: una sola llamada detecta ALL intents sin keywords ───
-    if trip and _llm_extract_fn:
-        result = _handle_llm_extraction(message, trip, user_id, chat_id, chat_history=chat_history)
+    # Paso 6: Dispatch por intent del LLM
+    if trip and llm_result:
+        logger.info("  [Paso 6] Dispatch intent=%s", llm_result.intent)
+        result = _dispatch_llm_intent(
+            llm_result, message, trip, user_id, chat_id, chat_history,
+        )
         if result is not None:
+            logger.info("  [Paso 6] Dispatch retorno tipo=%s", result.get("type"))
             return result
-        # Fall-through: LLM chat para informative/unknown
+        # Fall-through: informative/unknown → LLM chat
         if _USE_LLM and _llm_process_fn:
+            logger.info("  [Paso 6] Fall-through → LLM chat")
             return _llm_chat_response(message, trip, user_id, chat_id)
 
-    # ─── PATH SIN LLM: deteccion por keywords ───
-    if trip and not _llm_extract_fn:
-        # Evento de cronograma (REQ-CF-002) — evaluar ANTES de add_item
-        if detect_calendar_intent(msg):
-            return _calendar_event_response(trip)
-        # Agregar item — extraccion basica
-        if detect_add_item_intent(msg):
-            return _add_item_response(msg, trip)
-        # Eliminar item
-        if detect_remove_item_intent(msg):
-            return _remove_item_response(msg, trip)
-        # Busqueda de hoteles via Booking.com
-        if _USE_BOOKING and detect_hotel_intent(msg):
-            result = _hotel_search_response(message, trip, user_id, chat_id)
-            if result is not None:
-                return result
-        # Busqueda de vuelos
-        if _USE_FLIGHTS and detect_flight_intent(msg):
-            result = _flight_search_response(message, trip, user_id, chat_id)
-            if result is not None:
-                return result
-
-    # ─── Sin LLM configurado ───
+    # Paso 7: Sin LLM configurado
+    logger.info("  [Paso 7] Sin LLM configurado")
     return {
         "role": "assistant",
         "type": "text",
@@ -236,6 +254,15 @@ def process_message(message: str, trip: Optional[dict] = None,
             "- Gestionar tu itinerario desde las secciones de la barra lateral"
         ),
     }
+
+
+def _clear_session_draft(key: str):
+    """Limpia un draft del session_state de Streamlit."""
+    try:
+        import streamlit as st
+        st.session_state[key] = None
+    except Exception:
+        pass
 
 
 def _is_same_destination(new_dest: str, current_dest: str) -> bool:
@@ -299,58 +326,7 @@ def _handle_trip_creation_flow(
             "_trip_creation_draft": updated,
         }
 
-    # ─── Sin draft: detectar intención de crear viaje ───
-    # Con LLM disponible Y viaje activo, dejar que el LLM decida (evita falsos positivos por keywords).
-    # Sin viaje activo (modo creación), usar keywords directamente — el LLM no tiene contexto de trip.
-    if _llm_extract_fn and trip is not None:
-        return None
-
-    if detect_trip_creation_intent(msg):
-        # Protección contra falsos positivos cuando hay viaje activo
-        if trip is not None:
-            tentative = extract_trip_data(original_message, new_draft())
-            new_dest = tentative.get("destination")
-            if not new_dest:
-                # No se detectó destino nuevo → no iniciar creación
-                return None
-            current_dest = (trip.get("destination") or "").lower().strip()
-            if _is_same_destination(new_dest.lower().strip(), current_dest):
-                # Mismo destino → no crear duplicado
-                return None
-
-        draft = new_draft()
-        updated = extract_trip_data(original_message, draft)
-        updated["step"] = "collecting"
-
-        missing = get_missing_fields(updated)
-
-        if not missing:
-            # Mensaje completo con todo → validar y confirmar directamente
-            valid, error = validate_dates(updated["start_date"], updated["end_date"])
-            if not valid:
-                updated["start_date"] = None
-                updated["end_date"] = None
-                prompt = error + "\n\n" + build_prompt_for_missing(updated, get_missing_fields(updated))
-                return {
-                    "role": "assistant",
-                    "type": "text",
-                    "content": prompt,
-                    "_trip_creation_draft": updated,
-                }
-            updated["step"] = "ready"
-            confirmation = build_confirmation_data(updated)
-            confirmation["_trip_creation_draft"] = None
-            return confirmation
-
-        # Faltan datos → iniciar flujo multi-turn
-        prompt = build_prompt_for_missing(updated, missing)
-        return {
-            "role": "assistant",
-            "type": "text",
-            "content": prompt,
-            "_trip_creation_draft": updated,
-        }
-
+    # Sin draft: el LLM detecta create_trip via _dispatch_llm_intent
     return None
 
 
@@ -358,6 +334,7 @@ def _handle_item_creation_flow(
     msg: str, original_message: str,
     trip: Optional[dict], draft: Optional[dict],
     chat_history: Optional[list] = None,
+    llm_result=None,
 ) -> Optional[dict]:
     """Maneja el flujo multi-turn de creacion de item (REQ-CF-003).
 
@@ -369,7 +346,7 @@ def _handle_item_creation_flow(
         return None
 
     # Cancelacion
-    if detect_item_cancel_intent(msg):
+    if detect_cancel_intent(msg):
         return {
             "role": "assistant",
             "type": "text",
@@ -377,8 +354,8 @@ def _handle_item_creation_flow(
             "_item_creation_draft": None,
         }
 
-    # Pregunta informativa: dejar pasar al LLM sin consumir turno
-    if _is_informative_question(msg):
+    # El LLM clasifico como informative → dejar pasar al LLM chat
+    if llm_result and llm_result.intent == "informative":
         return None
 
     # Incrementar turnos
@@ -402,16 +379,18 @@ def _handle_item_creation_flow(
     old_start = draft.get("start_time")
     old_end = draft.get("end_time")
 
-    # Extraer datos del mensaje (LLM o regex fallback)
-    if _llm_extract_fn:
-        llm_result = _llm_extract_fn(original_message, trip, draft, chat_history=chat_history)
-        if llm_result:
-            updated = _merge_extraction_to_draft(llm_result, draft)
+    # Extraer datos del mensaje via LLM result (ya calculado en paso 1)
+    if llm_result and llm_result.intent == "add_item":
+        updated = _merge_extraction_to_draft(llm_result, draft)
+    elif _llm_extract_fn:
+        # Fallback: llamada directa si llm_result no aplica
+        local_result = _llm_extract_fn(original_message, trip, draft, chat_history=chat_history)
+        if local_result:
+            updated = _merge_extraction_to_draft(local_result, draft)
         else:
-            # Error en LLM → fallback a regex
-            updated = extract_item_data(original_message, trip, draft)
+            updated = dict(draft)
     else:
-        updated = extract_item_data(original_message, trip, draft)
+        updated = dict(draft)
     updated["step"] = "collecting"
 
     # Si el horario cambio, resetear _conflict_warned para re-evaluar conflictos
@@ -452,7 +431,6 @@ def _finalize_item_draft(draft: dict, trip: dict) -> dict:
     item_type = draft.get("item_type", "actividad")
     start_time = draft.get("start_time")
     if not start_time:
-        from services.item_extraction import _DEFAULT_TIMES
         start_time = _DEFAULT_TIMES.get(item_type, "10:00")
         draft["start_time"] = start_time
     if not draft.get("end_time"):
@@ -484,22 +462,17 @@ def _finalize_item_draft(draft: dict, trip: dict) -> dict:
     return confirmation
 
 
-def _handle_llm_extraction(
+def _dispatch_llm_intent(
+    result,
     message: str, trip: dict,
     user_id: Optional[str] = None, chat_id: Optional[str] = None,
     chat_history: Optional[list] = None,
 ) -> Optional[dict]:
-    """Deteccion de intent y extraccion unificada via LLM structured output.
+    """Dispatch por intent del LLM. El result ya existe, no se llama al LLM aqui.
 
-    Reemplaza la cadena de if (calendar → add_item → remove_item → hotel) cuando
-    el LLM esta disponible. Una sola llamada detecta intent y extrae datos.
-
-    Retorna dict de respuesta si el LLM maneja el intent, o None para fall-through.
+    Retorna dict de respuesta si el intent es accionable, o None para fall-through.
     """
-    result = _llm_extract_fn(message, trip, chat_history=chat_history)
-    if result is None:
-        return None  # Error en LLM, fall through
-
+    logger.info("    [dispatch] intent=%s", result.intent)
     if result.intent == "add_item":
         return _handle_extraction_result(result, trip)
 
@@ -514,13 +487,12 @@ def _handle_llm_extraction(
 
     if result.intent == "hotel_search":
         if _USE_BOOKING:
-            return _hotel_search_response(message, trip, user_id, chat_id)
-        # Sin Booking → fall through al LLM chat para respuesta informativa
+            return _hotel_search_response(message, trip, user_id, chat_id, llm_result=result)
         return None
 
     if result.intent == "flight_search":
         if _USE_FLIGHTS:
-            return _flight_search_response(message, trip, user_id, chat_id)
+            return _flight_search_response(message, trip, user_id, chat_id, llm_result=result)
         return None
 
     if result.intent == "add_expense":
@@ -551,10 +523,19 @@ def _handle_create_trip_from_llm(result, message: str, trip: Optional[dict]) -> 
             return None  # Fall through al LLM chat
 
     draft = new_draft()
+
+    # Fuente primaria: datos extraidos por el LLM
+    if destination:
+        draft["destination"] = destination
+    if getattr(result, "trip_start_date", None):
+        draft["start_date"] = result.trip_start_date
+    if getattr(result, "trip_end_date", None):
+        draft["end_date"] = result.trip_end_date
+    if getattr(result, "trip_name", None):
+        draft["name"] = result.trip_name
+
+    # Fallback: regex de fechas para lo que el LLM no extrajo
     updated = extract_trip_data(message, draft)
-    # Si el LLM extrajo destino pero extract_trip_data no, usarlo
-    if not updated.get("destination") and destination:
-        updated["destination"] = destination
     updated["step"] = "collecting"
 
     missing = get_missing_fields(updated)
@@ -876,27 +857,71 @@ def _merge_extraction_to_draft(result, draft: dict) -> dict:
 def _hotel_search_response(
     message: str, trip: dict,
     user_id: Optional[str] = None, chat_id: Optional[str] = None,
+    llm_result=None,
 ) -> Optional[dict]:
-    """Busca hoteles via Booking.com y retorna resultados formateados.
-
-    Retorna dict de respuesta con hotel_results, o None si no hay resultados.
-    """
+    """Busca hoteles via Booking.com con filtros del LLM."""
     try:
-        hotels = search_hotels_for_trip(trip, limit=5)
-        if not hotels:
-            return None
+        # Datos del LLM result (sin 2da llamada ni regex)
+        limit = 5
+        hotel_type = None
+        location_hint = ""
+        max_price = None
+        if llm_result:
+            limit = llm_result.result_count or 5
+            hotel_type = getattr(llm_result, "hotel_type", None)
+            location_hint = getattr(llm_result, "hotel_location", None) or ""
+            max_price = getattr(llm_result, "hotel_max_price", None)
+        logger.info("    [hotel_search] limit=%s, type=%s, location=%s, max_price=%s",
+                    limit, hotel_type, location_hint, max_price)
 
-        cards = format_hotels_as_cards(hotels)
+        # Buscar mas resultados si hay filtros (para tener margen de filtrado)
+        search_limit = limit * 3 if (hotel_type or max_price) else limit
+        logger.info("    [hotel_search] Buscando con search_limit=%s, location_hint='%s'", search_limit, location_hint)
+        hotels = search_hotels_for_trip(trip, limit=search_limit, location_hint=location_hint)
+        logger.info("    [hotel_search] Resultados API: %d hoteles", len(hotels) if hotels else 0)
+
+        if not hotels and location_hint:
+            # Reintentar SIN location_hint (puede ser una zona que no existe en el destino)
+            logger.info("    [hotel_search] Sin resultados con location_hint, reintentando sin filtro de zona")
+            hotels = search_hotels_for_trip(trip, limit=search_limit)
+            logger.info("    [hotel_search] Resultados retry: %d hoteles", len(hotels) if hotels else 0)
+
+        if not hotels:
+            dest = trip.get("destination", "tu destino")
+            return {
+                "role": "assistant",
+                "type": "text",
+                "content": f"No encontre alojamiento disponible en **{dest}** para esas fechas. Intenta con otras fechas o destino.",
+            }
+
+        # Aplicar filtros post-respuesta
+        filter_matched = True
+        if hotel_type or max_price:
+            count_before = len(hotels)
+            hotels = _filter_hotels(hotels, hotel_type=hotel_type or "", max_price=max_price or 0)
+            if hotel_type and len(hotels) == count_before:
+                filter_matched = False
+
+        hotels = hotels[:limit]
+        checkin = trip.get("start_date", "")
+        checkout = trip.get("end_date", "")
+        cards = format_hotels_as_cards(hotels, checkin=checkin, checkout=checkout)
 
         dest = trip.get("destination", "tu destino")
+        text_parts = [f"Hoteles en **{dest}**"]
+        if location_hint:
+            text_parts[0] = f"Hoteles en **{location_hint}, {dest}**"
+        if hotel_type:
+            text_parts[0] = text_parts[0].replace("Hoteles", hotel_type.capitalize() + "s")
+        text_parts.append(f"({checkin} — {checkout}):")
+        if not filter_matched and hotel_type:
+            text_parts.append(f"\n\n_No encontre {hotel_type}s en esta zona. Mostrando alojamientos disponibles._")
+
         return {
             "role": "assistant",
             "type": "hotel_results",
             "content": {
-                "text": (
-                    f"Hoteles en **{dest}** "
-                    f"({trip.get('start_date', '')} — {trip.get('end_date', '')}):"
-                ),
+                "text": " ".join(text_parts),
                 "hotels": cards,
             },
         }
@@ -905,36 +930,27 @@ def _hotel_search_response(
         return None
 
 
-def _extract_origin_from_message(message: str) -> str:
-    """Extrae la ciudad de origen de un mensaje como 'vuelos desde Buenos Aires'.
-
-    Busca patrones como: 'desde X', 'de X a', 'saliendo de X'.
-    Retorna la ciudad encontrada o cadena vacia.
-    """
-    lower = message.lower().strip()
-    # Patrones para extraer origen
-    patterns = [
-        re.compile(r'(?:desde|saliendo de|partiendo de|sale de|salgo de)\s+([A-Za-záéíóúñÁÉÍÓÚÑüÜ\s]+?)(?:\s+(?:a|hacia|para|al?)\s+|$)', re.IGNORECASE),
-        re.compile(r'(?:de)\s+([A-Za-záéíóúñÁÉÍÓÚÑüÜ\s]+?)\s+(?:a|hacia|para)\s+', re.IGNORECASE),
-    ]
-    for pat in patterns:
-        m = pat.search(lower)
-        if m:
-            origin = m.group(1).strip().rstrip(".,;:!?")
-            if len(origin) >= 2:
-                return origin
-    return ""
-
-
 def _flight_search_response(
     message: str, trip: dict,
     user_id: Optional[str] = None, chat_id: Optional[str] = None,
+    llm_result=None,
 ) -> Optional[dict]:
-    """Busca vuelos via Google Flights y retorna resultados formateados."""
+    """Busca vuelos con datos extraidos del LLM."""
     try:
-        # Extraer ciudad de origen del mensaje del usuario
-        origin = _extract_origin_from_message(message)
-        flights = search_flights_for_trip(trip, origin=origin, max_results=5)
+        # Datos del LLM result (sin regex)
+        origin = ""
+        destination_city = ""
+        limit = 5
+        if llm_result:
+            origin = llm_result.flight_origin or ""
+            destination_city = getattr(llm_result, "flight_destination", "") or ""
+            limit = llm_result.result_count or 5
+        logger.info("    [flight_search] origin=%s, destination_city=%s, limit=%s",
+                    origin, destination_city, limit)
+
+        flights = search_flights_for_trip(
+            trip, origin=origin, destination_city=destination_city, max_results=limit,
+        )
         if not flights:
             return {
                 "role": "assistant",
@@ -950,8 +966,6 @@ def _flight_search_response(
 
         dest = trip.get("destination", "tu destino")
         origin_display = origin.title() if origin else "tu origen"
-        source = flights[0].get("_source", "") if flights else ""
-        source_label = "SerpAPI" if source == "serpapi" else "Google Flights"
         return {
             "role": "assistant",
             "type": "flight_results",
@@ -995,29 +1009,6 @@ def _llm_chat_response(
             "type": "text",
             "content": "Hubo un error al procesar tu mensaje. Por favor, intenta de nuevo.",
         }
-
-
-def _add_item_response(msg: str, trip: dict) -> dict:
-    """Extrae datos del mensaje y genera confirmacion o inicia flujo multi-turn.
-
-    Solo se usa como fallback cuando no hay LLM disponible."""
-    draft = new_item_draft()
-    draft = extract_item_data(msg, trip, draft)
-    draft["step"] = "collecting"
-
-    missing = get_missing_item_fields(draft)
-
-    if not missing:
-        return _finalize_item_draft(draft, trip)
-
-    # Faltan datos — multi-turn
-    prompt = build_item_prompt_for_missing(draft, missing)
-    return {
-        "role": "assistant",
-        "type": "text",
-        "content": prompt,
-        "_item_creation_draft": draft,
-    }
 
 
 def _calendar_event_response(trip: dict) -> dict:
@@ -1139,19 +1130,11 @@ def _remove_item_response(msg: str, trip: dict, llm_result=None) -> dict:
             },
         }
 
-    # ─── Path SIN LLM (fallback): ultimo item ───
-    last_item = items[-1]
+    # Sin resultado LLM → no se puede determinar que eliminar
     return {
         "role": "assistant",
-        "type": "confirmation",
-        "content": {
-            "action": "remove_item",
-            "summary": f"Eliminar '{last_item['name']}' del itinerario",
-            "details": {
-                "item_id": last_item["id"],
-                "item_name": last_item["name"],
-            },
-        },
+        "type": "text",
+        "content": "No pude determinar que items quieres eliminar. Indica cuales con mas detalle.",
     }
 
 

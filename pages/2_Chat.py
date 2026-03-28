@@ -51,22 +51,51 @@ try:
     selector_options.append(_CREAR_NUEVO)
     selector_labels[_CREAR_NUEVO] = "Crear nuevo viaje"
 
+    # Si hay un viaje recien creado desde el chat, forzar seleccion ANTES del widget
+    _force_trip = st.session_state.pop("_force_select_trip", None)
+    if _force_trip and _force_trip in selector_options:
+        st.session_state.trip_selector_widget = _force_trip
+
     # Determinar indice inicial basado en session_state
     saved_selection = st.session_state.get("chat_selected_trip_id")
     default_index = 0
-    if not available_trips:
-        # Usuario sin viajes: pre-seleccionar "Crear nuevo viaje" automáticamente
-        default_index = selector_options.index(_CREAR_NUEVO)
-    elif saved_selection and saved_selection in selector_options:
+    if saved_selection and saved_selection in selector_options:
         default_index = selector_options.index(saved_selection)
 
-    selected_key = st.selectbox(
-        "Selecciona un viaje para chatear",
-        options=selector_options,
-        format_func=lambda k: selector_labels.get(k, k),
-        index=default_index,
-        key="trip_selector_widget",
-    )
+    # Layout: selector + boton "Nuevo Chat" en la misma fila
+    sel_col, btn_col = st.columns([0.75, 0.25])
+    with sel_col:
+        selected_key = st.selectbox(
+            "Selecciona un viaje para chatear",
+            options=selector_options,
+            format_func=lambda k: selector_labels.get(k, k),
+            index=default_index,
+            key="trip_selector_widget",
+        )
+    with btn_col:
+        st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
+        _valid_selection = selected_key != _PLACEHOLDER
+        if st.button(
+            "+ Nuevo Chat",
+            use_container_width=True,
+            key="new_chat_top_btn",
+            disabled=not _valid_selection,
+        ):
+            _new_trip_id = None
+            if selected_key == _CREAR_NUEVO:
+                _new_trip_id = None
+            elif selected_key != _PLACEHOLDER:
+                _new_trip_id = selected_key
+            new_chat = create_chat(
+                user_id=user_id,
+                trip_id=_new_trip_id,
+                title="Nueva conversacion" if _new_trip_id else "Nuevo viaje",
+            )
+            st.session_state.active_chat_id = new_chat["chat_id"]
+            st.session_state.user_chats = load_chats(user_id)
+            if _new_trip_id:
+                st.session_state._chat_prev_trip_id = _new_trip_id
+            st.rerun()
 
     # Persistir seleccion en session_state (RN-008)
     if selected_key != _PLACEHOLDER:
@@ -92,34 +121,18 @@ try:
         else:
             st.warning("El viaje seleccionado ya no existe. Selecciona otro.")
 
-    # ─── Cargar/crear chat al cambiar viaje (RN-007) ───
+    # ─── Cargar chat existente al cambiar viaje (sin auto-crear) ───
     if chat_enabled and not is_creating_new_trip and chat_trip:
         prev_trip = st.session_state.get("_chat_prev_trip_id")
         if prev_trip != chat_trip["id"]:
-            # Viaje cambio — limpiar drafts y cargar ultimo chat o crear uno nuevo
             _clear_drafts()
             latest = get_latest_chat_for_trip(user_id, chat_trip["id"])
             if latest:
                 st.session_state.active_chat_id = latest["chat_id"]
             else:
-                new_chat = create_chat(
-                    user_id=user_id,
-                    trip_id=chat_trip["id"],
-                    title="Nueva conversacion",
-                )
-                st.session_state.active_chat_id = new_chat["chat_id"]
+                # No auto-crear — el usuario debe apretar "+ Nuevo Chat"
+                st.session_state.active_chat_id = None
             st.session_state._chat_prev_trip_id = chat_trip["id"]
-            st.session_state.user_chats = load_chats(user_id)
-
-    elif chat_enabled and is_creating_new_trip:
-        # Modo creacion: si no hay chat activo, crear uno sin trip_id
-        if not st.session_state.get("active_chat_id"):
-            new_chat = create_chat(
-                user_id=user_id,
-                trip_id=None,
-                title="Nuevo viaje",
-            )
-            st.session_state.active_chat_id = new_chat["chat_id"]
             st.session_state.user_chats = load_chats(user_id)
 
     # ─── Header compacto con info del viaje + badges ───
@@ -161,18 +174,6 @@ try:
             label_visibility="collapsed",
             key="chat_search",
         )
-
-        # Boton nuevo chat
-        if chat_enabled:
-            if st.button("+ Nuevo Chat", use_container_width=True, key="new_chat_btn"):
-                new_chat = create_chat(
-                    user_id=user_id,
-                    trip_id=chat_trip["id"] if chat_trip else None,
-                    title="Nueva conversacion",
-                )
-                st.session_state.active_chat_id = new_chat["chat_id"]
-                st.session_state.user_chats = load_chats(user_id)
-                st.rerun()
 
         st.divider()
 
@@ -410,6 +411,7 @@ try:
                             st.session_state.pop("_trip_creation_draft", None)
                             # Actualizar selector al nuevo viaje
                             st.session_state.chat_selected_trip_id = new_trip["id"]
+                            st.session_state._force_select_trip = new_trip["id"]
                             st.session_state._chat_prev_trip_id = new_trip["id"]
                             add_message(active_chat, {
                                 "role": "assistant",
